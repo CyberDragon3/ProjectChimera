@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CHIMERA — Diagnostic Dashboard</title>
+  <link rel="stylesheet" href="/static/css/tokens.css" />
+  <link rel="stylesheet" href="/static/css/dash.css" />
+</head>
+<body>
+  <main class="dash-grid">
+    <!-- Tier 1: Executive -->
+    <section class="panel panel-executive" data-tier="executive">
+      <header class="panel-head">
+        <span class="panel-dot" style="background: var(--purple)"></span>
+        <h2>Executive</h2>
+        <span class="panel-meta" id="exec-meta">0 events</span>
+      </header>
+      <div class="panel-body">
+        <pre id="exec-log" class="mono log"></pre>
+      </div>
+    </section>
+
+    <!-- Tier 2: Translation -->
+    <section class="panel panel-translation" data-tier="translation">
+      <header class="panel-head">
+        <span class="panel-dot" style="background: var(--teal)"></span>
+        <h2>Translation</h2>
+        <span class="panel-meta" id="trans-meta">idle</span>
+      </header>
+      <div class="panel-body tiles">
+        <div class="tile">
+          <div class="tile-label">Ommatidia (16x16)</div>
+          <canvas id="omm-canvas" width="256" height="256"></canvas>
+        </div>
+        <div class="tile">
+          <div class="tile-label">Pressure</div>
+          <div class="pressure-wrap">
+            <div class="pressure-bar">
+              <div id="pressure-fill" class="pressure-fill"></div>
+              <div id="pressure-threshold" class="pressure-threshold"></div>
+            </div>
+            <div class="pressure-readout">
+              <div><span class="muted">p</span> <span id="pressure-val">0.00</span></div>
+              <div><span class="muted">dp/dt</span> <span id="pressure-deriv">0.00</span></div>
+              <div><span class="muted">cpu</span> <span id="pressure-cpu">0.00</span></div>
+              <div><span class="muted">ram</span> <span id="pressure-ram">0.00</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="tile">
+          <div class="tile-label">Sugar</div>
+          <canvas id="sugar-canvas" width="256" height="256"></canvas>
+          <div class="sugar-readout">
+            <span id="sugar-val" class="big-num">0.000</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tier 3: Reflex -->
+    <section class="panel panel-reflex" data-tier="reflex">
+      <header class="panel-head">
+        <span class="panel-dot" style="background: var(--red)"></span>
+        <h2>Reflex</h2>
+        <span class="panel-meta" id="reflex-meta">spike rasters (5 s)</span>
+      </header>
+      <div class="panel-body">
+        <div class="raster-row">
+          <div class="raster-label">fly</div>
+          <canvas class="raster" id="raster-fly" width="800" height="48"></canvas>
+        </div>
+        <div class="raster-row">
+          <div class="raster-label">worm</div>
+          <canvas class="raster" id="raster-worm" width="800" height="48"></canvas>
+        </div>
+        <div class="raster-row">
+          <div class="raster-label">mouse</div>
+          <canvas class="raster" id="raster-mouse" width="800" height="48"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- Action -->
+    <section class="panel panel-action" data-tier="action">
+      <header class="panel-head">
+        <span class="panel-dot" style="background: var(--amber)"></span>
+        <h2>Action</h2>
+        <span class="panel-meta" id="action-meta">0 interrupts</span>
+      </header>
+      <div class="panel-body">
+        <ul id="action-list" class="action-list"></ul>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/js/dash.js" defer></script>
+</body>
+</html>
