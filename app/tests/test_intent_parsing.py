@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from app.contracts import BioPolicy
-from app.tier1_executive import OllamaClient, parse_intent
+from app.tier1_executive import OllamaClient, describe_policy_change, parse_command, parse_intent
 
 
 pytestmark = pytest.mark.asyncio
@@ -36,6 +36,30 @@ def _baseline_policy() -> BioPolicy:
         "mouse": {"track_target_xy": None, "error_threshold": 120.0,
                   "consecutive_frames": 3},
     })
+
+
+async def test_describe_policy_change_summarizes_updates():
+    before = _baseline_policy()
+    after = BioPolicy.from_dict({
+        "fly": {"sensitivity": 0.8, "looming_threshold": 0.35},
+        "worm": {"cpu_pain_threshold": 0.70, "ram_pain_threshold": 0.90,
+                 "poke_derivative": 0.25, "dwell_ms": 800},
+        "mouse": {"track_target_xy": None, "error_threshold": 120.0,
+                  "consecutive_frames": 3},
+    })
+
+    text = describe_policy_change(before, after)
+
+    assert text.startswith("Understood. Updated ")
+    assert "fly sensitivity to 0.80" in text
+    assert "worm CPU pain threshold to 70 percent" in text
+
+
+async def test_describe_policy_change_handles_noop():
+    before = _baseline_policy()
+    text = describe_policy_change(before, before)
+
+    assert "kept the current reflex policy" in text
 
 
 async def test_wellformed_json_merges():
@@ -132,4 +156,60 @@ async def test_chat_raises_connect_error_returns_current_policy():
     # Must NOT propagate the exception.
     new_policy = await parse_intent(client, "tighten worm CPU", current)
     assert new_policy.to_dict() == current.to_dict()
+    await client.aclose()
+
+
+async def test_parse_command_routes_open_app_without_model():
+    def stub(_msgs: list[dict]) -> str:
+        raise AssertionError("deterministic routing should not call the model")
+
+    client = _make_client(stub)
+    tool, args = await parse_command(client, "open chrome", {
+        "tools": {"safe_apps": {"chrome": "chrome"}},
+    })
+
+    assert tool == "open_app"
+    assert args == {"name": "chrome"}
+    await client.aclose()
+
+
+async def test_parse_command_routes_open_site_without_model():
+    def stub(_msgs: list[dict]) -> str:
+        raise AssertionError("deterministic routing should not call the model")
+
+    client = _make_client(stub)
+    tool, args = await parse_command(client, "open youtube", {
+        "tools": {"safe_apps": {"chrome": "chrome"}},
+    })
+
+    assert tool == "open_url"
+    assert args == {"url": "https://www.youtube.com/"}
+    await client.aclose()
+
+
+async def test_parse_command_routes_search_without_model():
+    def stub(_msgs: list[dict]) -> str:
+        raise AssertionError("deterministic routing should not call the model")
+
+    client = _make_client(stub)
+    tool, args = await parse_command(client, "search latest ai news", {
+        "tools": {"safe_apps": {"chrome": "chrome"}},
+    })
+
+    assert tool == "search_web"
+    assert args == {"query": "latest ai news"}
+    await client.aclose()
+
+
+async def test_parse_command_empty_model_response_reports_backend_issue():
+    def stub(_msgs: list[dict]) -> str:
+        return ""
+
+    client = _make_client(stub)
+    tool, args = await parse_command(client, "explain the dashboard", {
+        "tools": {"safe_apps": {"chrome": "chrome"}},
+    })
+
+    assert tool == "reply"
+    assert args["text"] == "I couldn't reach the model just now."
     await client.aclose()

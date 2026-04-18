@@ -1,16 +1,89 @@
+// Project Chimera — first-run setup wizard.
+// Flow: (1) pick provider, (2) configure + test, (3) voice, (4) launch.
+
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+const PROVIDERS = {
+  ollama: {
+    label: "Ollama",
+    summary: "Local",
+    fields: ["host", "model"],
+    default: {
+      host: "http://localhost:11434",
+      model: "qwen2.5:0.5b",
+    },
+    suggestions: [
+      "qwen2.5:0.5b",
+      "qwen2.5:3b",
+      "llama3.2:1b",
+      "llama3.2:3b",
+      "phi3:mini",
+      "mistral:7b",
+    ],
+  },
+  openai: {
+    label: "OpenAI",
+    summary: "Cloud",
+    fields: ["api_key", "model"],
+    default: {
+      base_url: "https://api.openai.com/v1",
+      model: "gpt-4o-mini",
+    },
+    suggestions: [
+      "gpt-4o-mini",
+      "gpt-4o",
+      "gpt-4.1-mini",
+      "gpt-4.1",
+      "o4-mini",
+    ],
+  },
+  anthropic: {
+    label: "Anthropic",
+    summary: "Cloud",
+    fields: ["api_key", "model"],
+    default: {
+      model: "claude-3-5-haiku-latest",
+    },
+    suggestions: [
+      "claude-3-5-haiku-latest",
+      "claude-3-5-sonnet-latest",
+      "claude-3-7-sonnet-latest",
+      "claude-sonnet-4-5",
+      "claude-opus-4-5",
+    ],
+  },
+  openai_compat: {
+    label: "OpenAI-compatible",
+    summary: "Custom",
+    fields: ["base_url", "api_key", "model"],
+    default: {
+      base_url: "http://localhost:8080/v1",
+      model: "",
+    },
+    suggestions: [
+      "llama-3.1-8b-instant",
+      "mixtral-8x7b-32768",
+      "gemma2-9b-it",
+    ],
+  },
+};
 
 const state = {
   current: 1,
   completed: new Set(),
+  provider: null,
+  config: {},
+  testedOk: false,
+  modelPresent: null,
   micOk: false,
-  modelOk: false,
-  ollamaOk: false,
+  userConfigPath: "",
   initialized: false,
 };
 
-let step2AutoAdvanceTimer = 0;
+// ---------------------------------------------------------------------------
+// Step navigation
+// ---------------------------------------------------------------------------
 
 function showStep(n) {
   state.current = n;
@@ -46,16 +119,20 @@ function advance(from, delay = 0) {
   }
 }
 
-async function probeStatus() {
-  const r = await fetch("/api/setup/status", { cache: "no-store" });
-  if (!r.ok) throw new Error(`status HTTP ${r.status}`);
-  return r.json();
+// ---------------------------------------------------------------------------
+// Summary cards
+// ---------------------------------------------------------------------------
+
+function setSummary(key, text, tone = "pending") {
+  const valueEl = $(`#summary-${key}`);
+  if (valueEl) valueEl.textContent = text;
+  const card = valueEl?.closest(".status-card");
+  if (card) card.dataset.tone = tone;
 }
 
 function setStepState(step, value, msg) {
   const stEl = $(`#s${step}-state`);
   if (stEl) stEl.dataset.state = value;
-
   const msgEl = $(`#s${step}-msg`);
   if (msgEl && msg !== undefined) {
     msgEl.textContent = msg;
@@ -71,183 +148,202 @@ function setStepNote(step, msg) {
   if (noteEl && msg !== undefined) noteEl.textContent = msg;
 }
 
-function setSummary(key, text, tone = "pending") {
-  const valueEl = $(`#summary-${key}`);
-  if (valueEl) valueEl.textContent = text;
+// ---------------------------------------------------------------------------
+// Step 1 — provider pick
+// ---------------------------------------------------------------------------
 
-  const card = valueEl?.closest(".status-card");
-  if (card) card.dataset.tone = tone;
-}
-
-function formatBytes(bytes) {
-  if (!Number.isFinite(bytes) || bytes <= 0) return null;
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let value = bytes;
-  let idx = 0;
-  while (value >= 1024 && idx < units.length - 1) {
-    value /= 1024;
-    idx += 1;
-  }
-  const digits = value >= 100 || idx === 0 ? 0 : 1;
-  return `${value.toFixed(digits)} ${units[idx]}`;
-}
-
-function formatPullStatus(status) {
-  if (!status) return "";
-  return /[.!?]$/.test(status) ? status : `${status}…`;
-}
-
-function resetModelProgress() {
-  $("#s2-progress").hidden = true;
-  $("#s2-fill").style.width = "0%";
-  $("#s2-percent").textContent = "0%";
-  $("#s2-digest").textContent = "";
-}
-
-function toggleStepButtons(step, disabled) {
-  $$(`#s${step}-actions .btn`).forEach((btn) => {
-    btn.disabled = disabled;
+function wireProviderCards() {
+  $$(".provider-card").forEach((card) => {
+    card.addEventListener("click", () => selectProvider(card.dataset.provider));
+  });
+  $$('input[name="provider"]').forEach((input) => {
+    input.addEventListener("change", () => selectProvider(input.value));
   });
 }
 
-function scheduleStep2AutoAdvance() {
-  window.clearTimeout(step2AutoAdvanceTimer);
-  step2AutoAdvanceTimer = window.setTimeout(() => {
-    step2AutoAdvanceTimer = 0;
-    if (state.current === 2 && state.modelOk) {
-      advance(2, 450);
-    }
-  }, 1500);
+function selectProvider(key) {
+  if (!PROVIDERS[key]) return;
+  state.provider = key;
+  $$(".provider-card").forEach((card) => {
+    card.classList.toggle("selected", card.dataset.provider === key);
+    const input = card.querySelector('input[type="radio"]');
+    if (input) input.checked = card.dataset.provider === key;
+  });
+  $('[data-action="pick-provider"]').disabled = false;
+  setSummary("provider", PROVIDERS[key].label, "ok");
 }
 
-async function runStep1() {
-  window.clearTimeout(step2AutoAdvanceTimer);
-  step2AutoAdvanceTimer = 0;
+// ---------------------------------------------------------------------------
+// Step 2 — configure + test
+// ---------------------------------------------------------------------------
 
-  setSummary("ollama", "Checking", "busy");
-  setSummary("model", "Waiting", "pending");
-  setStepState(1, "busy", "Probing the configured Ollama host now.");
-  setStepNote(1, "Chimera only proceeds once the local runtime responds.");
-  $("#s1-actions").hidden = true;
+function primeStep2() {
+  if (!state.provider) return;
+  const def = PROVIDERS[state.provider];
 
-  let data;
-  try {
-    data = await probeStatus();
-  } catch (e) {
-    state.ollamaOk = false;
-    setSummary("ollama", "API error", "error");
-    setSummary("model", "Blocked", "pending");
-    setStepState(1, "error", `Couldn't reach the setup API: ${e.message}`);
-    setStepNote(1, "The browser could not load /api/setup/status.");
-    $("#s1-actions").hidden = false;
+  $("#s2-provider-name").textContent = def.label;
+
+  const form = $("#config-form");
+  const visibleFields = new Set(def.fields);
+  $$(".field", form).forEach((field) => {
+    field.hidden = !visibleFields.has(field.dataset.field);
+  });
+
+  // Wipe then seed defaults.
+  form.reset();
+  if (def.default.host !== undefined) form.elements["host"].value = def.default.host;
+  if (def.default.base_url !== undefined) form.elements["base_url"].value = def.default.base_url;
+  if (def.default.model !== undefined) form.elements["model"].value = def.default.model;
+
+  const dl = $("#model-suggestions");
+  dl.innerHTML = "";
+  (def.suggestions || []).forEach((m) => {
+    const opt = document.createElement("option");
+    opt.value = m;
+    dl.appendChild(opt);
+  });
+
+  const pullBtn = $('[data-action="pull-model"]');
+  pullBtn.hidden = state.provider !== "ollama";
+  $('[data-action="save-and-continue"]').disabled = true;
+  state.testedOk = false;
+  state.modelPresent = null;
+
+  setSummary("conn", "Waiting", "pending");
+  setStepState(2, "pending", `Enter your ${def.label} details and test the connection.`);
+  setStepNote(2, `Config is saved to ${state.userConfigPath || "the local user config"}.`);
+  $("#pull-progress").hidden = true;
+}
+
+function readForm() {
+  const form = $("#config-form");
+  const data = new FormData(form);
+  const out = {
+    provider: state.provider,
+    model: (data.get("model") || "").toString().trim(),
+    api_key: (data.get("api_key") || "").toString().trim(),
+    host: (data.get("host") || "").toString().trim(),
+    base_url: (data.get("base_url") || "").toString().trim(),
+  };
+  return out;
+}
+
+async function testConnection() {
+  const body = readForm();
+  if (!body.model) {
+    setStepState(2, "error", "Enter a model name first.");
+    return;
+  }
+  if (body.provider !== "ollama" && !body.api_key) {
+    setStepState(2, "error", "Paste your API key before testing.");
     return;
   }
 
-  const host = data.ollama?.url || "http://localhost:11434";
-  setStepNote(1, `Configured host: ${host}`);
-
-  if (data.ollama?.reachable) {
-    state.ollamaOk = true;
-    const version = data.ollama.version ? `v${data.ollama.version}` : "reachable";
-    setSummary("ollama", version, "ok");
-
-    const versionText = data.ollama.version ? ` (v${data.ollama.version})` : "";
-    setStepState(1, "ok", `Ollama responded on ${host}${versionText}.`);
-
-    const modelReady = primeStep2(data.model);
-    advance(1, 650);
-    if (modelReady) scheduleStep2AutoAdvance();
-  } else {
-    state.ollamaOk = false;
-    setSummary("ollama", "Offline", "error");
-    setSummary("model", "Blocked", "pending");
-    setStepState(1, "error", "Ollama is not responding yet. Start it locally, then retry.");
-    setStepNote(1, `Expected endpoint: ${host}`);
-    $("#s1-actions").hidden = false;
-  }
-}
-
-function primeStep2(modelInfo) {
-  const modelName = modelInfo?.model || "qwen2.5:0.5b";
-  const sizeText = formatBytes(modelInfo?.size_bytes);
-
-  $("#s2-model").textContent = modelName;
-  resetModelProgress();
-
-  if (sizeText) {
-    setStepNote(2, `Configured artifact: ${modelName} (${sizeText}) on disk.`);
-  } else {
-    setStepNote(2, `Configured artifact: ${modelName}.`);
-  }
-
-  if (modelInfo?.present) {
-    state.modelOk = true;
-    setSummary("model", "Ready", "ok");
-    setStepState(2, "ok", "Model is already installed and available locally.");
-    $("#s2-actions").hidden = true;
-    return true;
-  }
-
-  state.modelOk = false;
-  setSummary("model", "Needs pull", "pending");
-  setStepState(2, "pending", "The configured model is not on disk yet.");
-  $("#s2-actions").hidden = false;
-  return false;
-}
-
-function consumePullEvent(ev) {
-  if (ev.error) {
-    setSummary("model", "Pull failed", "error");
-  }
-
-  if (typeof ev.percent === "number") {
-    $("#s2-fill").style.width = `${ev.percent}%`;
-    $("#s2-percent").textContent = `${ev.percent.toFixed(1)}%`;
-  }
-
-  if (ev.digest) {
-    $("#s2-digest").textContent = ev.digest.slice(0, 14);
-  }
-
-  if (typeof ev.completed === "number" && typeof ev.total === "number" && ev.total > 0) {
-    const received = formatBytes(ev.completed);
-    const total = formatBytes(ev.total);
-    if (received && total) {
-      setStepNote(2, `Transferred ${received} of ${total}.`);
-    }
-  }
-
-  if (ev.status) {
-    setStepState(2, "busy", formatPullStatus(ev.status));
-  }
-}
-
-async function pullModel() {
-  resetModelProgress();
-  $("#s2-actions").hidden = true;
-  $("#s2-progress").hidden = false;
-  setSummary("model", "Downloading", "busy");
-  setStepState(2, "busy", "Pulling the configured model from Ollama. This can take a few minutes.");
-  setStepNote(2, `Target model: ${$("#s2-model").textContent}.`);
+  setSummary("conn", "Testing", "busy");
+  setStepState(2, "busy", `Probing ${PROVIDERS[body.provider].label}…`);
+  $('[data-action="save-and-continue"]').disabled = true;
+  $('[data-action="pull-model"]').hidden = true;
 
   let resp;
   try {
-    resp = await fetch("/api/setup/pull_model", { method: "POST" });
+    resp = await fetch("/api/setup/test_provider", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
   } catch (e) {
-    setSummary("model", "Pull failed", "error");
+    setSummary("conn", "Network error", "error");
     setStepState(2, "error", `Network error: ${e.message}`);
-    setStepNote(2, "The pull request never reached the local setup API.");
-    $("#s2-actions").hidden = false;
-    $("#s2-progress").hidden = true;
+    return;
+  }
+
+  const data = await resp.json().catch(() => ({}));
+
+  if (body.provider === "ollama") {
+    const reachable = !!data.ollama?.reachable;
+    const modelPresent = !!data.model?.present;
+    state.modelPresent = modelPresent;
+
+    if (!reachable) {
+      setSummary("conn", "Offline", "error");
+      setStepState(2, "error", "Ollama daemon is not responding. Start it and retry.");
+      setStepNote(2, `Host tried: ${body.host}`);
+      return;
+    }
+    const versionText = data.ollama.version ? ` v${data.ollama.version}` : "";
+    setSummary("conn", `Reachable${versionText}`, "ok");
+
+    if (!modelPresent) {
+      setStepState(2, "pending", `Model ${body.model} is not on disk yet. Download it to continue.`);
+      $('[data-action="pull-model"]').hidden = false;
+      state.testedOk = false;
+      $('[data-action="save-and-continue"]').disabled = true;
+      return;
+    }
+    setStepState(2, "ok", `Daemon online and ${body.model} is cached locally.`);
+    state.testedOk = true;
+    $('[data-action="save-and-continue"]').disabled = false;
+    return;
+  }
+
+  // Cloud providers
+  const cloud = data.cloud || {};
+  if (!cloud.reachable) {
+    setSummary("conn", "Unreachable", "error");
+    setStepState(2, "error", cloud.error || "Could not reach the provider.");
+    return;
+  }
+  if (!cloud.authenticated) {
+    setSummary("conn", "Auth failed", "error");
+    setStepState(2, "error", cloud.error || "Authentication failed. Check the key.");
+    return;
+  }
+  setSummary("conn", "Authenticated", "ok");
+  if (cloud.model_ok === false) {
+    setStepState(2, "error", `Auth OK but ${body.model} isn't listed by this account. Pick a different model.`);
+    const dl = $("#model-suggestions");
+    dl.innerHTML = "";
+    (cloud.models || []).slice(0, 50).forEach((m) => {
+      const opt = document.createElement("option");
+      opt.value = m;
+      dl.appendChild(opt);
+    });
+    $('[data-action="save-and-continue"]').disabled = true;
+    return;
+  }
+  setStepState(2, "ok", `Authenticated with ${PROVIDERS[body.provider].label}. ${body.model} is available.`);
+  state.testedOk = true;
+  $('[data-action="save-and-continue"]').disabled = false;
+}
+
+async function pullOllamaModel() {
+  const body = readForm();
+  if (body.provider !== "ollama") return;
+
+  setSummary("conn", "Downloading", "busy");
+  $("#pull-progress").hidden = false;
+  $("#pull-fill").style.width = "0%";
+  $("#pull-percent").textContent = "0%";
+  $("#pull-digest").textContent = "";
+  setStepState(2, "busy", `Pulling ${body.model} from Ollama. This can take a few minutes.`);
+  $('[data-action="pull-model"]').disabled = true;
+
+  let resp;
+  try {
+    resp = await fetch("/api/setup/pull_model", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ host: body.host, model: body.model }),
+    });
+  } catch (e) {
+    setStepState(2, "error", `Pull network error: ${e.message}`);
+    $('[data-action="pull-model"]').disabled = false;
     return;
   }
 
   if (!resp.ok || !resp.body) {
-    setSummary("model", "Pull failed", "error");
     setStepState(2, "error", `Pull failed (HTTP ${resp.status}).`);
-    setStepNote(2, "Ollama did not accept the model pull request.");
-    $("#s2-actions").hidden = false;
-    $("#s2-progress").hidden = true;
+    $('[data-action="pull-model"]').disabled = false;
     return;
   }
 
@@ -257,74 +353,95 @@ async function pullModel() {
   let success = false;
   let lastError = null;
 
+  function consume(ev) {
+    if (ev.error) lastError = ev.error;
+    if (typeof ev.percent === "number") {
+      $("#pull-fill").style.width = `${ev.percent}%`;
+      $("#pull-percent").textContent = `${ev.percent.toFixed(1)}%`;
+    }
+    if (ev.digest) $("#pull-digest").textContent = ev.digest.slice(0, 14);
+    if (ev.status) setStepState(2, "busy", `${ev.status}…`);
+    if (ev.done && !ev.error) success = true;
+  }
+
   while (true) {
     const { value, done } = await reader.read();
     buf += decoder.decode(value || new Uint8Array(), { stream: !done });
-
     const lines = buf.split("\n");
     buf = lines.pop() ?? "";
-
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-
-      let ev;
-      try {
-        ev = JSON.parse(trimmed);
-      } catch {
-        continue;
-      }
-
-      if (ev.error) lastError = ev.error;
-      consumePullEvent(ev);
-      if (ev.done && !ev.error) success = true;
+      try { consume(JSON.parse(trimmed)); } catch { /* ignore */ }
     }
-
     if (done) break;
   }
+  if (buf.trim()) { try { consume(JSON.parse(buf.trim())); } catch { /* ignore */ } }
 
-  const tail = buf.trim();
-  if (tail) {
-    try {
-      const ev = JSON.parse(tail);
-      if (ev.error) lastError = ev.error;
-      consumePullEvent(ev);
-      if (ev.done && !ev.error) success = true;
-    } catch {
-      // Ignore malformed tail fragments from interrupted streams.
-    }
-  }
+  $('[data-action="pull-model"]').disabled = false;
 
   if (success) {
-    $("#s2-fill").style.width = "100%";
-    $("#s2-percent").textContent = "100%";
-    state.modelOk = true;
-    setSummary("model", "Ready", "ok");
-    setStepState(2, "ok", "Model download complete.");
-    setStepNote(2, `${$("#s2-model").textContent} is cached locally and ready.`);
-    advance(2, 600);
+    $("#pull-fill").style.width = "100%";
+    $("#pull-percent").textContent = "100%";
+    setSummary("conn", "Ready", "ok");
+    setStepState(2, "ok", `${body.model} is cached and ready.`);
+    state.testedOk = true;
+    state.modelPresent = true;
+    $('[data-action="pull-model"]').hidden = true;
+    $('[data-action="save-and-continue"]').disabled = false;
   } else {
-    setSummary("model", "Pull failed", "error");
+    setSummary("conn", "Pull failed", "error");
     setStepState(2, "error", lastError || "Pull did not complete.");
-    setStepNote(2, "Retry the pull once Ollama is running and reachable.");
-    $("#s2-actions").hidden = false;
   }
 }
+
+async function saveAndContinue() {
+  const body = readForm();
+  if (!state.testedOk) {
+    setStepState(2, "error", "Run the connection test first.");
+    return;
+  }
+
+  setStepState(2, "busy", "Saving configuration…");
+  $('[data-action="save-and-continue"]').disabled = true;
+
+  let resp;
+  try {
+    resp = await fetch("/api/setup/save_provider", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    setStepState(2, "error", `Could not save config: ${e.message}`);
+    $('[data-action="save-and-continue"]').disabled = false;
+    return;
+  }
+
+  if (!resp.ok) {
+    setStepState(2, "error", `Save failed (HTTP ${resp.status}).`);
+    $('[data-action="save-and-continue"]').disabled = false;
+    return;
+  }
+
+  state.config = body;
+  advance(2, 400);
+}
+
+// ---------------------------------------------------------------------------
+// Step 3 — voice (unchanged behavior)
+// ---------------------------------------------------------------------------
 
 async function enableMic() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     state.micOk = false;
     setSummary("mic", "Unavailable", "error");
     setStepState(3, "error", "This browser does not expose microphone capture.");
-    setStepNote(3, "Text commands still work without microphone access.");
     return;
   }
-
   setSummary("mic", "Awaiting permission", "busy");
   setStepState(3, "busy", "Waiting for microphone permission…");
-  setStepNote(3, "Your browser should prompt for audio access now.");
   toggleStepButtons(3, true);
-
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -332,68 +449,49 @@ async function enableMic() {
     state.micOk = false;
     setSummary("mic", "Keyboard only", "error");
     setStepState(3, "error", "Microphone access was not granted.");
-    setStepNote(3, "You can allow the microphone later from browser settings.");
     toggleStepButtons(3, false);
     return;
   }
-
   state.micOk = true;
   setSummary("mic", "Live", "ok");
   setStepState(3, "ok", "Microphone confirmed. Voice commands can start immediately.");
-  setStepNote(3, "Running a short level check so you can see audio activity.");
   await runMeter(stream, 2000);
   stream.getTracks().forEach((t) => t.stop());
   toggleStepButtons(3, false);
   advance(3, 450);
 }
 
+function toggleStepButtons(step, disabled) {
+  $$(`#s${step}-actions .btn`).forEach((btn) => { btn.disabled = disabled; });
+}
+
 async function runMeter(stream, ms) {
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) return;
-
   let ctx;
-  try {
-    ctx = new AC();
-  } catch {
-    return;
-  }
-
+  try { ctx = new AC(); } catch { return; }
   const src = ctx.createMediaStreamSource(stream);
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 256;
   src.connect(analyser);
-
   const data = new Uint8Array(analyser.fftSize);
   const meter = $("#s3-meter");
   const fill = $("#s3-meter-fill");
   meter.hidden = false;
-
   const start = performance.now();
   return new Promise((resolve) => {
     function tick() {
       analyser.getByteTimeDomainData(data);
       let sum = 0;
       for (let i = 0; i < data.length; i += 1) {
-        const value = (data[i] - 128) / 128;
-        sum += value * value;
+        const v = (data[i] - 128) / 128;
+        sum += v * v;
       }
-
       const rms = Math.sqrt(sum / data.length);
-      const pct = Math.min(100, Math.round(rms * 400));
-      fill.style.width = `${pct}%`;
-
-      if (performance.now() - start < ms) {
-        requestAnimationFrame(tick);
-      } else {
-        try {
-          ctx.close();
-        } catch {
-          // Ignore close failures from browsers that tear down the context early.
-        }
-        resolve();
-      }
+      fill.style.width = `${Math.min(100, Math.round(rms * 400))}%`;
+      if (performance.now() - start < ms) requestAnimationFrame(tick);
+      else { try { ctx.close(); } catch { /* ignore */ } resolve(); }
     }
-
     tick();
   });
 }
@@ -402,17 +500,16 @@ function skipMic() {
   state.micOk = false;
   setSummary("mic", "Keyboard only", "pending");
   setStepState(3, "pending", "Microphone skipped. Keyboard commands stay available.");
-  setStepNote(3, "You can enable voice later from the browser.");
   advance(3, 250);
 }
 
+// ---------------------------------------------------------------------------
+// Step 4 — launch
+// ---------------------------------------------------------------------------
+
 async function launch() {
   const btn = $('[data-action="launch"]');
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "Opening Chimera…";
-  }
-
+  if (btn) { btn.disabled = true; btn.textContent = "Opening Jarvis…"; }
   try {
     const r = await fetch("/api/setup/mark_complete", { method: "POST" });
     const data = await r.json().catch(() => ({}));
@@ -422,17 +519,32 @@ async function launch() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Event wiring
+// ---------------------------------------------------------------------------
+
 function onClick(e) {
   const target = e.target.closest("[data-action]");
   if (!target) return;
-
   const action = target.dataset.action;
   switch (action) {
-    case "retry-ollama":
-      runStep1();
+    case "pick-provider":
+      if (!state.provider) return;
+      markDone(1);
+      primeStep2();
+      showStep(2);
+      break;
+    case "back-to-provider":
+      showStep(1);
+      break;
+    case "test-connection":
+      testConnection();
       break;
     case "pull-model":
-      pullModel();
+      pullOllamaModel();
+      break;
+    case "save-and-continue":
+      saveAndContinue();
       break;
     case "enable-mic":
       enableMic();
@@ -445,26 +557,52 @@ function onClick(e) {
       break;
     case "back": {
       const prev = state.current - 1;
-      if (prev >= 1 && state.completed.has(prev)) showStep(prev);
+      if (prev >= 1) showStep(prev);
       break;
     }
+    default:
+      break;
   }
 }
 
-function initializeWizard() {
+async function hydrateFromStatus() {
+  try {
+    const r = await fetch("/api/setup/status", { cache: "no-store" });
+    if (!r.ok) return;
+    const data = await r.json();
+    state.userConfigPath = data.config_path || "";
+    const hint = $("#config-path-hint");
+    if (hint && state.userConfigPath) {
+      hint.textContent = `User config: ${state.userConfigPath}`;
+    }
+    const inline = $("#cfg-path-inline");
+    if (inline && state.userConfigPath) {
+      inline.textContent = state.userConfigPath;
+    }
+
+    // If a provider is already persisted, pre-select it so re-runs are quick.
+    if (data.provider && PROVIDERS[data.provider]) {
+      selectProvider(data.provider);
+    }
+  } catch {
+    // Non-fatal — the wizard still works with defaults.
+  }
+}
+
+function initialize() {
   if (state.initialized) return;
   state.initialized = true;
-
-  setSummary("ollama", "Checking", "busy");
-  setSummary("model", "Waiting", "pending");
+  wireProviderCards();
+  setSummary("provider", "Not chosen", "pending");
+  setSummary("conn", "Waiting", "pending");
   setSummary("mic", "Optional", "pending");
   showStep(1);
-  runStep1();
+  hydrateFromStatus();
 }
 
 document.addEventListener("click", onClick);
-document.addEventListener("DOMContentLoaded", initializeWizard);
+document.addEventListener("DOMContentLoaded", initialize);
 
 if (document.readyState === "interactive" || document.readyState === "complete") {
-  initializeWizard();
+  initialize();
 }

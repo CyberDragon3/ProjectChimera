@@ -191,6 +191,9 @@ def fakes():
     snap.fly_spikes.extend([time.perf_counter_ns() - i * 1_000_000 for i in range(10)])
     snap.worm_spikes.extend([time.perf_counter_ns() - i * 2_000_000 for i in range(5)])
     snap.mouse_spikes.extend([time.perf_counter_ns() - i * 3_000_000 for i in range(3)])
+    snap.recent_executive.append(
+        _ExecutiveEvent(t_ns=time.perf_counter_ns(), kind="explain", text="Jarvis confirmed the policy change.")
+    )
 
     ps = _PolicyStore(_BioPolicy())
     exec_bus = _FanoutBus()
@@ -246,7 +249,7 @@ def test_root_returns_html(client):
     r = client.get("/")
     assert r.status_code == 200
     body = r.text.lower()
-    assert ("chimera" in body) or ("command" in body)
+    assert ("jarvis" in body) or ("chimera" in body) or ("command" in body)
 
 
 def test_dashboard_ok(client):
@@ -293,6 +296,7 @@ def test_ws_snapshot_frame(client):
             if msg.get("event") == "snapshot":
                 saw_snapshot = True
                 assert "data" in msg
+                assert "recent_executive" in msg["data"]
                 break
         assert saw_snapshot, "did not receive snapshot frame within 500 ms"
 

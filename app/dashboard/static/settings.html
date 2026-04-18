@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CHIMERA — settings</title>
+  <link rel="stylesheet" href="/static/css/tokens.css" />
+  <link rel="stylesheet" href="/static/css/setup.css" />
+</head>
+<body>
+  <main class="settings-shell">
+    <a class="settings-back" href="/">← Back to Chimera</a>
+
+    <section class="settings-card" aria-labelledby="current-title">
+      <h1 id="current-title" class="settings-title">Settings</h1>
+      <p class="settings-sub">
+        Change which brain drives Chimera, update your API key, or rerun the
+        onboarding wizard. Changes are written to your local user config.
+      </p>
+
+      <div class="settings-row">
+        <span class="settings-row-label">Provider</span>
+        <span class="settings-row-value" id="cur-provider">–</span>
+      </div>
+      <div class="settings-row">
+        <span class="settings-row-label">Model</span>
+        <span class="settings-row-value" id="cur-model">–</span>
+      </div>
+      <div class="settings-row">
+        <span class="settings-row-label">Endpoint</span>
+        <span class="settings-row-value" id="cur-endpoint">–</span>
+      </div>
+      <div class="settings-row">
+        <span class="settings-row-label">API key</span>
+        <span class="settings-row-value" id="cur-key">–</span>
+      </div>
+      <div class="settings-row">
+        <span class="settings-row-label">Config file</span>
+        <span class="settings-row-value" id="cur-path">–</span>
+      </div>
+
+      <div class="settings-actions">
+        <button class="btn primary" type="button" data-action="reconfigure">Change provider</button>
+        <button class="btn" type="button" data-action="rotate-key">Update API key</button>
+        <button class="btn ghost" type="button" data-action="reset-onboarding">Rerun onboarding</button>
+      </div>
+    </section>
+
+    <section class="settings-card" id="inline-edit" hidden aria-labelledby="edit-title">
+      <h2 id="edit-title" class="settings-title" style="font-size:1.2rem;">Update credentials</h2>
+      <p class="settings-sub" id="edit-sub">Paste a new API key for the current provider. Leave blank to keep the existing key.</p>
+
+      <form class="config-form" id="inline-form" autocomplete="off" spellcheck="false">
+        <label class="field" data-field="api_key">
+          <span>New API key</span>
+          <input type="password" name="api_key" placeholder="sk-…" />
+          <small>Stored locally only. Existing key is preserved if you leave this blank.</small>
+        </label>
+        <label class="field" data-field="model">
+          <span>Model</span>
+          <input type="text" name="model" />
+        </label>
+      </form>
+
+      <div class="settings-actions">
+        <button class="btn primary" type="button" data-action="save-inline">Save</button>
+        <button class="btn ghost" type="button" data-action="cancel-inline">Cancel</button>
+      </div>
+      <p class="wizard-footnote" id="inline-msg"></p>
+    </section>
+  </main>
+
+  <script type="module" src="/static/js/settings.js"></script>
+</body>
+</html>

@@ -67,6 +67,8 @@ hiddenimports = [
     "app.contracts",
     "app.event_bus",
     "app.tier1_executive",
+    "app.tools",
+    "app.setup_check",
     "app.tier2_translation",
     "app.tier3_reflex",
     "app.tier3_reflex.fly",

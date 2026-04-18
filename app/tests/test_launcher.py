@@ -65,5 +65,5 @@ def test_embedded_startup_loads_error_html_when_server_crashes(monkeypatch) -> N
 
     assert window.loaded_url is None
     assert window.loaded_html is not None
-    assert "Chimera did not finish starting" in window.loaded_html
+    assert "Jarvis did not finish starting" in window.loaded_html
     assert "server exited during startup" in window.loaded_html.lower()

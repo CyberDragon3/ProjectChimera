@@ -4,10 +4,10 @@ Responsibilities:
     1. Resolve the config path (next to the executable when frozen, otherwise
        fall back to the package's bundled config).
     2. Start `app.main.run_app()` in a background thread via asyncio.
-    3. Prefer an embedded desktop window for the localhost UI when the
-       optional `pywebview` dependency is available.
-    4. Fall back to the user's default browser if the embedded shell cannot
-       be imported or fails to initialize.
+    3. Prefer the user's default browser for the localhost UI because browser
+       speech APIs are more reliable there than inside the embedded shell.
+    4. Allow the embedded shell as an opt-in fallback when
+       `CHIMERA_EMBEDDED=1` is set.
     5. Log everything to %APPDATA%/Chimera/chimera.log (rotating at 1 MB).
     6. Keep the process alive until the server exits, the window closes, or
        SIGINT is received.
@@ -34,7 +34,7 @@ import webbrowser
 from pathlib import Path
 from typing import Any
 
-WINDOW_TITLE = "Project Chimera"
+WINDOW_TITLE = "Jarvis | Project Chimera"
 BROWSER_STARTUP_TIMEOUT_S = 10.0
 EMBEDDED_STARTUP_TIMEOUT_S = 60.0
 EMBEDDED_WINDOW_SIZE = (1280, 900)
@@ -74,7 +74,13 @@ log = logging.getLogger("chimera.launcher")
 
 
 def _resolve_config_path() -> Path:
-    """Resolve the runtime config path for source and frozen executions."""
+    """Resolve the bundled-defaults config path.
+
+    This always points at the read-only defaults. ``app.main.load_config``
+    is responsible for layering the writable per-user config
+    (``%APPDATA%/Chimera/config.yaml``) on top via a deep merge, so partial
+    user files never wipe out other sections.
+    """
     if getattr(sys, "frozen", False):
         exe_dir = Path(sys.executable).parent
         external = exe_dir / "config.yaml"
@@ -85,6 +91,22 @@ def _resolve_config_path() -> Path:
         if bundled.exists():
             return bundled
     return Path(__file__).parent / "config.yaml"
+
+
+def _read_user_config() -> dict:
+    """Best-effort read of the writable per-user config, for URL resolution.
+    Returns ``{}`` when the file is missing or malformed.
+    """
+    try:
+        from app.setup_check import user_config_path  # type: ignore
+        path = user_config_path()
+        if not path.exists():
+            return {}
+        import yaml  # type: ignore
+        with path.open("r", encoding="utf-8") as handle:
+            return yaml.safe_load(handle) or {}
+    except Exception:
+        return {}
 
 
 def _patch_main_config_path() -> None:
@@ -113,8 +135,9 @@ def _read_server_url() -> str:
         import yaml  # type: ignore
 
         with _resolve_config_path().open("r", encoding="utf-8") as handle:
-            cfg = yaml.safe_load(handle) or {}
-        server_cfg = cfg.get("server", {})
+            base = yaml.safe_load(handle) or {}
+        patch = _read_user_config()
+        server_cfg = {**(base.get("server") or {}), **(patch.get("server") or {})}
         host = server_cfg.get("host", "127.0.0.1")
         port = int(server_cfg.get("port", 8000))
     except Exception:
@@ -191,8 +214,8 @@ def _embedded_loading_html(url: str) -> str:
 </head>
 <body>
   <main>
-    <h1>Starting Chimera</h1>
-    <p>The local dashboard is booting inside this window.</p>
+    <h1>Starting Jarvis</h1>
+    <p>The local Jarvis surface is booting inside this window.</p>
     <p>If startup takes longer than expected, the app will keep waiting for <code>{safe_url}</code>.</p>
   </main>
 </body>
@@ -247,7 +270,7 @@ def _embedded_error_html(url: str, message: str) -> str:
 </head>
 <body>
   <main>
-    <h1>Chimera did not finish starting</h1>
+    <h1>Jarvis did not finish starting</h1>
     <p>{safe_message}</p>
     <p>Expected UI endpoint: <code>{safe_url}</code></p>
     <p>Startup logs: <code>{safe_log_path}</code></p>
@@ -263,6 +286,11 @@ def _import_webview() -> Any | None:
     except Exception as exc:  # noqa: BLE001
         log.info("embedded shell unavailable; falling back to browser: %s", exc)
         return None
+
+
+def _prefer_embedded_shell() -> bool:
+    value = (os.environ.get("CHIMERA_EMBEDDED") or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
 
 
 class _ServerThread(threading.Thread):
@@ -381,7 +409,13 @@ def main() -> int:
     except Exception:
         pass
 
-    embedded_ran = _open_embedded_shell(url, server)
+    embedded_ran = False
+    if _prefer_embedded_shell():
+        log.info("CHIMERA_EMBEDDED is set; attempting embedded shell")
+        embedded_ran = _open_embedded_shell(url, server)
+    else:
+        log.info("defaulting to the system browser for full voice support")
+
     if embedded_ran:
         log.info("embedded shell closed; stopping server")
         _request_shutdown()

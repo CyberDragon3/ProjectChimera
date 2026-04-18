@@ -15,10 +15,21 @@ from .contracts import ExecutiveEvent
 
 log = logging.getLogger("chimera.actions")
 
-Handler = Callable[[InterruptEvent, dict[str, Any], ExecutiveBus], Awaitable[None]]
+Handler = Callable[[InterruptEvent, dict[str, Any], ExecutiveBus, Snapshot], Awaitable[None]]
 
 
-async def handle_kill_process(event: InterruptEvent, cfg: dict[str, Any], exec_bus: ExecutiveBus) -> None:
+async def _publish(exec_bus: ExecutiveBus, snapshot: Snapshot, text: str) -> None:
+    event = ExecutiveEvent(t_ns=now_ns(), kind="status", text=text)
+    snapshot.recent_executive.append(event)
+    await exec_bus.publish(event)
+
+
+async def handle_kill_process(
+    event: InterruptEvent,
+    cfg: dict[str, Any],
+    exec_bus: ExecutiveBus,
+    snapshot: Snapshot,
+) -> None:
     """AVA recoil → dry-run kill notification."""
     dry = cfg.get("actions", {}).get("kill_process_dry_run", True)
     msg = (
@@ -27,21 +38,31 @@ async def handle_kill_process(event: InterruptEvent, cfg: dict[str, Any], exec_b
         + ("dry-run: no process killed" if dry else "LIVE: kill disabled in MVP")
     )
     log.warning(msg)
-    await exec_bus.publish(ExecutiveEvent(t_ns=now_ns(), kind="status", text=msg))
+    await _publish(exec_bus, snapshot, msg)
 
 
-async def handle_snap_cursor(event: InterruptEvent, cfg: dict[str, Any], exec_bus: ExecutiveBus) -> None:
+async def handle_snap_cursor(
+    event: InterruptEvent,
+    cfg: dict[str, Any],
+    exec_bus: ExecutiveBus,
+    snapshot: Snapshot,
+) -> None:
     """Fly looming → no cursor snap in MVP; log only (pynput import deferred
     by Agent-Translation). Extend here if desired."""
     msg = f"[REFLEX] fly looming fired (flow={event.payload.get('flow'):.2f})"
     log.warning(msg)
-    await exec_bus.publish(ExecutiveEvent(t_ns=now_ns(), kind="status", text=msg))
+    await _publish(exec_bus, snapshot, msg)
 
 
-async def handle_error_spike(event: InterruptEvent, cfg: dict[str, Any], exec_bus: ExecutiveBus) -> None:
+async def handle_error_spike(
+    event: InterruptEvent,
+    cfg: dict[str, Any],
+    exec_bus: ExecutiveBus,
+    snapshot: Snapshot,
+) -> None:
     msg = f"[REFLEX] mouse cortex error spike (err={event.payload.get('error'):.1f} px)"
     log.warning(msg)
-    await exec_bus.publish(ExecutiveEvent(t_ns=now_ns(), kind="status", text=msg))
+    await _publish(exec_bus, snapshot, msg)
 
 
 HANDLERS: dict[str, Handler] = {
@@ -56,6 +77,6 @@ async def dispatch(event: InterruptEvent, cfg: dict[str, Any], exec_bus: Executi
     if h is None:
         log.info("No handler for interrupt kind=%s", event.kind)
         return
-    await h(event, cfg, exec_bus)
+    await h(event, cfg, exec_bus, snapshot)
     event.t_action_ns = now_ns()
     snapshot.recent_interrupts.append(event)

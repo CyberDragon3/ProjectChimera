@@ -3,22 +3,55 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>CHIMERA</title>
+  <title>JARVIS | Project Chimera</title>
   <link rel="stylesheet" href="/static/css/tokens.css" />
   <link rel="stylesheet" href="/static/css/bar.css" />
 </head>
 <body>
   <div id="conn" class="conn" data-state="offline" aria-label="connection"></div>
 
+  <header class="home-head" aria-label="Jarvis surface heading">
+    <p class="home-kicker">Local Executive Surface</p>
+    <h1 class="home-title">JARVIS</h1>
+    <p class="home-sub">
+      Say “Jarvis”, tap the orb, or press space and speak. Jarvis routes your command to a tool —
+      open a site, launch an app, search the web — and narrates what it did.
+    </p>
+  </header>
+
+  <section class="transcript-shell" aria-label="Jarvis transcript">
+    <div class="transcript-head">
+      <span>Recent review loop</span>
+      <button id="clear-log" class="transcript-clear" type="button">Clear</button>
+    </div>
+    <div id="transcript" class="transcript"></div>
+  </section>
+
   <main id="stage" class="stage">
-    <div id="orb" class="orb" data-state="idle" role="button" tabindex="0" aria-label="Talk to Chimera">
+    <div id="orb" class="orb" data-state="idle" role="button" tabindex="0" aria-label="Talk to Jarvis">
       <div class="orb-core"></div>
       <div class="orb-bloom"></div>
       <div class="orb-ring"></div>
       <div class="orb-glow"></div>
     </div>
     <div id="caption" class="caption" aria-live="polite"></div>
+    <p class="orb-hint">Say “Jarvis” or press Space to listen. Enter text if speech recognition is unavailable. Press <kbd>D</kbd> for diagnostics.</p>
   </main>
+
+  <section class="quickbar" aria-label="Quick Jarvis commands">
+    <button class="quickcmd" type="button" data-command="open chrome">
+      Open Chrome
+    </button>
+    <button class="quickcmd" type="button" data-command="open youtube">
+      Open YouTube
+    </button>
+    <button class="quickcmd" type="button" data-command="search latest AI news">
+      Search the web
+    </button>
+    <button class="quickcmd" type="button" data-command="open notepad">
+      Open Notepad
+    </button>
+  </section>
 
   <div id="policy" class="policy" aria-live="polite"></div>
   <div id="reflexlog" class="reflexlog" aria-live="polite"></div>
@@ -34,6 +67,15 @@
       <path d="M3 10h18"/><path d="M9 4v16"/>
     </svg>
   </button>
+
+  <a id="settings-link" class="drawer-toggle" href="/settings" aria-label="Settings"
+     style="right: 56px;" title="Settings (provider, API key)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.7 1.7 0 0 0 .4 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.4 1.7 1.7 0 0 0-1 1.6V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.6 1.7 1.7 0 0 0-1.9.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .4-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1.1 1.7 1.7 0 0 0-.4-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.4h0a1.7 1.7 0 0 0 1-1.6V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.4l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.4 1.9v0a1.7 1.7 0 0 0 1.6 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.6 1z"/>
+    </svg>
+  </a>
 
   <aside id="drawer" class="drawer" aria-hidden="true">
     <iframe id="drawer-frame" title="Diagnostics" src="about:blank" loading="lazy"></iframe>

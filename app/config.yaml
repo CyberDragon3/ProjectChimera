@@ -1,5 +1,20 @@
 # Project Chimera runtime config. All tunables live here.
 
+# Active LLM backend. The onboarding wizard writes into this section.
+# provider: ollama | openai | anthropic | openai_compat
+# For cloud providers, api_key lives alongside model.
+# For openai_compat, base_url points at the target (Groq, Together, Azure, llama.cpp, vLLM…).
+llm:
+  provider: "ollama"
+  model: "qwen2.5:0.5b"
+  host: "http://localhost:11434"     # ollama only
+  base_url: null                      # openai / openai_compat only
+  api_key: ""                        # openai / anthropic / openai_compat only
+  timeout_s: 30.0
+  temperature: 0.1
+  max_tokens: 1024
+
+# Legacy block — still honored when llm.provider == "ollama" and fields are omitted above.
 ollama:
   host: "http://localhost:11434"
   model: "qwen2.5:0.5b"
@@ -41,3 +56,31 @@ policy:
 actions:
   kill_process_dry_run: true   # NEVER flip without explicit user ask
   snap_cursor_enabled: true
+
+# Reflex modules are the bio-inspired research bit. Keep them on so the
+# translation/reflex stack is actually visible on a fresh install.
+reflex:
+  fly_enabled: true
+  worm_enabled: true
+  mouse_enabled: true
+
+# Allow-list for real computer-control tools. Each flag governs whether the
+# LLM can actually execute that tool. Off by default for anything destructive.
+tools:
+  open_url: true
+  open_app: true
+  search_web: true
+  type_text: false
+  run_shell: false
+  safe_apps:
+    # Friendly name → Windows command. Extend freely.
+    chrome: "chrome"
+    edge: "msedge"
+    firefox: "firefox"
+    notepad: "notepad"
+    calculator: "calc"
+    explorer: "explorer"
+    terminal: "wt"
+    cmd: "cmd"
+    spotify: "spotify"
+    vscode: "code"

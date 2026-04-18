@@ -154,6 +154,10 @@ def _serialize_snapshot(snapshot: Any, policy_store: Any) -> dict[str, Any]:
     for ev in list(getattr(snapshot, "recent_interrupts", []) or []):
         recent_interrupts.append(_serialize_interrupt(ev))
 
+    recent_executive = []
+    for ev in list(getattr(snapshot, "recent_executive", []) or []):
+        recent_executive.append(_serialize_executive(ev))
+
     return {
         "t_ns": time.perf_counter_ns(),
         "policy": policy,
@@ -167,6 +171,7 @@ def _serialize_snapshot(snapshot: Any, policy_store: Any) -> dict[str, Any]:
             "mouse": mouse_spikes,
         },
         "recent_interrupts": recent_interrupts,
+        "recent_executive": recent_executive,
     }
 
 
@@ -217,24 +222,183 @@ def build_app(snapshot, policy_store, exec_bus, interrupt_bus, command_queue, cf
             raise HTTPException(status_code=404, detail="setup.html not found")
         return FileResponse(str(path))
 
+    @app.get("/settings", response_class=HTMLResponse)
+    async def settings_page() -> Any:
+        path = STATIC_DIR / "settings.html"
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="settings.html not found")
+        return FileResponse(str(path))
+
+    def _current_llm_cfg() -> dict:
+        """Preferred: cfg.llm; fallback: synthesize from legacy cfg.ollama."""
+        llm = _cfg_get(["llm"]) or {}
+        if not llm or not llm.get("provider"):
+            llm = {
+                "provider": "ollama",
+                "model": _cfg_get(["ollama", "model"], "qwen2.5:0.5b"),
+                "host": _cfg_get(["ollama", "host"], "http://localhost:11434"),
+                "timeout_s": _cfg_get(["ollama", "timeout_s"], 30.0),
+                "temperature": _cfg_get(["ollama", "temperature"], 0.1),
+            }
+        return dict(llm)
+
+    def _redact(cfg: dict) -> dict:
+        """Return an llm cfg dict with api_key masked for display."""
+        out = dict(cfg or {})
+        key = out.get("api_key") or ""
+        if key:
+            out["api_key_masked"] = setup_check._mask_key(key)
+            out["api_key_set"] = True
+        else:
+            out["api_key_masked"] = ""
+            out["api_key_set"] = False
+        out.pop("api_key", None)
+        return out
+
     @app.get("/api/setup/status")
     async def setup_status() -> dict:
-        host = str(_cfg_get(["ollama", "host"], "http://localhost:11434"))
-        model = str(_cfg_get(["ollama", "model"], "qwen2.5:0.5b"))
-        ollama = await setup_check.check_ollama(host)
-        model_info = {"present": False, "size_bytes": None, "model": model}
-        if ollama.get("reachable"):
-            model_info = await setup_check.check_model(host, model)
-        return {
+        llm = _current_llm_cfg()
+        provider = str(llm.get("provider") or "ollama")
+        payload: dict[str, Any] = {
             "marker": setup_check.is_complete(),
-            "ollama": ollama,
-            "model": model_info,
+            "provider": provider,
+            "llm": _redact(llm),
+            "config_path": str(setup_check.user_config_path()),
+            "config_exists": setup_check.user_config_path().exists(),
+        }
+
+        if provider == "ollama":
+            host = str(llm.get("host") or "http://localhost:11434")
+            model = str(llm.get("model") or "qwen2.5:0.5b")
+            ollama = await setup_check.check_ollama(host)
+            model_info = {"present": False, "size_bytes": None, "model": model}
+            if ollama.get("reachable"):
+                model_info = await setup_check.check_model(host, model)
+            payload["ollama"] = ollama
+            payload["model"] = model_info
+        elif provider == "anthropic":
+            probe = await setup_check.check_anthropic(
+                str(llm.get("api_key") or ""),
+                str(llm.get("model") or ""),
+            )
+            payload["cloud"] = probe
+        else:  # openai / openai_compat
+            probe = await setup_check.check_openai(
+                str(llm.get("api_key") or ""),
+                str(llm.get("base_url") or "https://api.openai.com/v1"),
+                str(llm.get("model") or ""),
+            )
+            payload["cloud"] = probe
+
+        return payload
+
+    @app.post("/api/setup/test_provider")
+    async def setup_test_provider(body: dict) -> dict:
+        """Probe the given provider configuration *without* persisting it.
+
+        Body shape: ``{"provider": "...", "model": "...", "api_key": "...",
+        "base_url": "...", "host": "..."}``.
+        """
+        body = body or {}
+        provider = str(body.get("provider") or "ollama").lower()
+        model = str(body.get("model") or "")
+
+        if provider == "ollama":
+            host = str(body.get("host") or "http://localhost:11434")
+            ollama = await setup_check.check_ollama(host)
+            model_info = None
+            if ollama.get("reachable") and model:
+                model_info = await setup_check.check_model(host, model)
+            ok = bool(ollama.get("reachable"))
+            return {
+                "ok": ok,
+                "provider": provider,
+                "ollama": ollama,
+                "model": model_info,
+            }
+
+        if provider == "anthropic":
+            probe = await setup_check.check_anthropic(
+                str(body.get("api_key") or ""), model or None,
+            )
+            return {
+                "ok": bool(probe.get("authenticated")),
+                "provider": provider,
+                "cloud": probe,
+            }
+
+        # openai / openai_compat
+        probe = await setup_check.check_openai(
+            str(body.get("api_key") or ""),
+            str(body.get("base_url") or "https://api.openai.com/v1"),
+            model or None,
+        )
+        return {
+            "ok": bool(probe.get("authenticated")),
+            "provider": provider,
+            "cloud": probe,
+        }
+
+    @app.post("/api/setup/save_provider")
+    async def setup_save_provider(body: dict) -> dict:
+        """Persist a provider configuration to the writable user config.
+
+        Body: ``{"provider", "model", "api_key"?, "base_url"?, "host"?,
+        "temperature"?, "timeout_s"?, "max_tokens"?}``. Existing fields
+        are deep-merged — unrelated sections of the config are preserved.
+        """
+        body = body or {}
+        provider = str(body.get("provider") or "").lower()
+        if provider not in ("ollama", "openai", "anthropic", "openai_compat"):
+            raise HTTPException(status_code=400, detail=f"unknown provider: {provider}")
+
+        llm_patch: dict[str, Any] = {
+            "provider": provider,
+            "model": str(body.get("model") or ""),
+        }
+        for optional in ("temperature", "timeout_s", "max_tokens"):
+            if optional in body and body[optional] is not None:
+                llm_patch[optional] = body[optional]
+
+        if provider == "ollama":
+            llm_patch["host"] = str(body.get("host") or "http://localhost:11434")
+        else:
+            api_key = body.get("api_key")
+            if api_key:  # only overwrite when a new value is supplied
+                llm_patch["api_key"] = str(api_key)
+            if provider in ("openai", "openai_compat"):
+                default_base = (
+                    "https://api.openai.com/v1" if provider == "openai"
+                    else "http://localhost:8080/v1"
+                )
+                llm_patch["base_url"] = str(body.get("base_url") or default_base)
+
+        user_cfg = setup_check.load_user_config()
+        merged = setup_check.deep_merge(user_cfg, {"llm": llm_patch})
+
+        # Keep legacy ollama mirror in sync when provider is ollama so existing
+        # code paths that still read ollama.host / ollama.model stay valid.
+        if provider == "ollama":
+            merged = setup_check.deep_merge(merged, {
+                "ollama": {
+                    "host": llm_patch["host"],
+                    "model": llm_patch["model"],
+                }
+            })
+
+        path = setup_check.save_user_config(merged)
+        return {
+            "ok": True,
+            "config_path": str(path),
+            "restart_required": True,
+            "llm": _redact(merged.get("llm") or {}),
         }
 
     @app.post("/api/setup/pull_model")
-    async def setup_pull_model() -> StreamingResponse:
-        host = str(_cfg_get(["ollama", "host"], "http://localhost:11434"))
-        model = str(_cfg_get(["ollama", "model"], "qwen2.5:0.5b"))
+    async def setup_pull_model(body: dict | None = None) -> StreamingResponse:
+        body = body or {}
+        host = str(body.get("host") or _cfg_get(["llm", "host"]) or _cfg_get(["ollama", "host"], "http://localhost:11434"))
+        model = str(body.get("model") or _cfg_get(["llm", "model"]) or _cfg_get(["ollama", "model"], "qwen2.5:0.5b"))
 
         async def gen():
             async for ev in setup_check.stream_pull(host, model):
@@ -246,6 +410,25 @@ def build_app(snapshot, policy_store, exec_bus, interrupt_bus, command_queue, cf
     async def setup_mark_complete() -> dict:
         setup_check.mark_complete()
         return {"ok": True, "redirect": "/"}
+
+    @app.post("/api/setup/reset")
+    async def setup_reset() -> dict:
+        """Forget the first-run marker so the wizard runs again on next load."""
+        setup_check.unmark()
+        return {"ok": True, "redirect": "/setup"}
+
+    @app.get("/api/settings")
+    async def settings_get() -> dict:
+        """Return the merged runtime config with secrets redacted for the
+        settings UI. Includes both the active (merged) config and the
+        user-layer overrides so the UI can tell what was customized."""
+        llm = _current_llm_cfg()
+        return {
+            "llm": _redact(llm),
+            "user_config_path": str(setup_check.user_config_path()),
+            "user_config_exists": setup_check.user_config_path().exists(),
+            "marker": setup_check.is_complete(),
+        }
 
     @app.get("/dashboard", response_class=HTMLResponse)
     async def dashboard() -> Any:
@@ -272,9 +455,74 @@ def build_app(snapshot, policy_store, exec_bus, interrupt_bus, command_queue, cf
 
     @app.post("/api/voice")
     async def post_voice(file: UploadFile = File(...)) -> dict:
-        _ = await file.read()
-        log.warning("voice endpoint stubbed — no transcription wired")
-        return {"text": "[voice transcription not wired]"}
+        """Transcribe an uploaded audio blob via an OpenAI-compatible
+        ``/audio/transcriptions`` endpoint.
+
+        Works with OpenAI directly (whisper-1) and with any OpenAI-compatible
+        host that exposes Whisper (e.g. Groq's ``whisper-large-v3-turbo``).
+        For Anthropic or Ollama the caller can set ``voice.base_url`` /
+        ``voice.api_key`` / ``voice.model`` in the user config to route voice
+        through a different provider than the chat LLM.
+        """
+        blob = await file.read()
+        if not blob:
+            raise HTTPException(status_code=400, detail="empty upload")
+
+        llm = _current_llm_cfg()
+        voice = _cfg_get(["voice"]) or {}
+
+        api_key = str(voice.get("api_key") or "").strip()
+        base_url = str(voice.get("base_url") or "").strip()
+        model = str(voice.get("model") or "whisper-1").strip()
+
+        # Auto-inherit from the chat LLM when voice is not explicitly configured.
+        if not api_key or not base_url:
+            provider = str(llm.get("provider") or "").lower()
+            if provider in ("openai", "openai_compat") and llm.get("api_key"):
+                api_key = api_key or str(llm["api_key"])
+                base_url = base_url or str(llm.get("base_url") or "https://api.openai.com/v1")
+
+        if not api_key or not base_url:
+            return {
+                "ok": False,
+                "text": "",
+                "error": "Voice transcription needs an OpenAI-compatible key. Add one in Settings or type your command instead.",
+            }
+
+        import httpx  # local import keeps the module optional for tests
+
+        filename = file.filename or "audio.webm"
+        mime = file.content_type or "audio/webm"
+        url = base_url.rstrip("/") + "/audio/transcriptions"
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                r = await client.post(
+                    url,
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    files={"file": (filename, blob, mime)},
+                    data={"model": model, "response_format": "json"},
+                )
+        except httpx.HTTPError as exc:
+            return {"ok": False, "text": "", "error": f"transcription network error: {exc}"}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "text": "", "error": f"transcription error: {exc}"}
+
+        if r.status_code != 200:
+            detail = (r.text or "")[:200]
+            return {
+                "ok": False,
+                "text": "",
+                "error": f"transcription HTTP {r.status_code}: {detail}",
+            }
+
+        try:
+            data = r.json()
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "text": "", "error": f"transcription bad json: {exc}"}
+
+        text = str(data.get("text") or "").strip()
+        return {"ok": True, "text": text, "model": model}
 
     @app.get("/api/policy")
     async def get_policy() -> dict:
