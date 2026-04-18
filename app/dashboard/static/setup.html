@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CHIMERA — setup</title>
+  <link rel="stylesheet" href="/static/css/tokens.css" />
+  <link rel="stylesheet" href="/static/css/setup.css" />
+</head>
+<body>
+  <main class="wizard-shell">
+    <section class="wizard-intro" aria-label="Setup overview">
+      <p class="wizard-kicker">First-run calibration</p>
+      <header class="wizard-head">
+        <h1 class="wizard-title">CHIMERA <span class="brand-mark">🧬</span></h1>
+        <p class="wizard-sub">
+          Bring the local runtime, model cache, and optional voice path online
+          before the command surface opens.
+        </p>
+      </header>
+
+      <div class="wizard-brief">
+        <p class="wizard-copy">
+          This handoff stays local. The wizard only checks the configured Ollama
+          daemon, ensures the expected model exists on disk, and optionally
+          primes microphone access for voice commands.
+        </p>
+
+        <div class="status-grid" aria-label="Setup status summary">
+          <article class="status-card" data-tone="busy">
+            <span>Runtime</span>
+            <strong id="summary-ollama">Checking</strong>
+            <p>Local Ollama daemon</p>
+          </article>
+          <article class="status-card" data-tone="pending">
+            <span>Model</span>
+            <strong id="summary-model">Waiting</strong>
+            <p>Configured inference artifact</p>
+          </article>
+          <article class="status-card" data-tone="pending">
+            <span>Voice</span>
+            <strong id="summary-mic">Optional</strong>
+            <p>Browser microphone access</p>
+          </article>
+        </div>
+      </div>
+
+      <ol class="stepper" aria-hidden="true">
+        <li data-step="1" class="active">
+          <span>1</span>
+          <small>Runtime</small>
+        </li>
+        <li data-step="2">
+          <span>2</span>
+          <small>Model</small>
+        </li>
+        <li data-step="3">
+          <span>3</span>
+          <small>Voice</small>
+        </li>
+        <li data-step="4">
+          <span>4</span>
+          <small>Launch</small>
+        </li>
+      </ol>
+    </section>
+
+    <section class="wizard" aria-label="Chimera first-run setup">
+      <section class="step" data-step="1" aria-labelledby="s1-title">
+        <div class="step-head">
+          <span class="step-num">1</span>
+          <div>
+            <p class="step-label">Runtime check</p>
+            <h2 id="s1-title">Confirm the local Ollama daemon</h2>
+          </div>
+        </div>
+        <p class="step-body" id="s1-msg" aria-live="polite">
+          Probing the configured Ollama host now.
+        </p>
+        <p class="step-note" id="s1-note">
+          Chimera only proceeds once the local runtime responds.
+        </p>
+        <div class="step-state" id="s1-state" data-state="pending"></div>
+        <div class="step-actions" id="s1-actions" hidden>
+          <a class="btn ghost" href="https://ollama.com/download" target="_blank" rel="noopener noreferrer">Install Ollama</a>
+          <button class="btn" type="button" data-action="retry-ollama">Retry check</button>
+        </div>
+      </section>
+
+      <section class="step" data-step="2" aria-labelledby="s2-title" hidden>
+        <div class="step-head">
+          <span class="step-num">2</span>
+          <div>
+            <p class="step-label">Model staging</p>
+            <h2 id="s2-title">Stage the configured language model</h2>
+          </div>
+        </div>
+        <p class="step-body" id="s2-msg" aria-live="polite">
+          Checking for <code id="s2-model">qwen2.5:0.5b</code> on disk.
+        </p>
+        <p class="step-note" id="s2-note">
+          The command layer expects this exact model name.
+        </p>
+        <div class="step-state" id="s2-state" data-state="pending"></div>
+        <div class="progress" id="s2-progress" hidden>
+          <div class="progress-bar"><div class="progress-fill" id="s2-fill"></div></div>
+          <div class="progress-meta">
+            <span id="s2-percent">0%</span>
+            <code id="s2-digest"></code>
+          </div>
+        </div>
+        <div class="step-actions" id="s2-actions" hidden>
+          <button class="btn primary" type="button" data-action="pull-model">Download model</button>
+        </div>
+      </section>
+
+      <section class="step" data-step="3" aria-labelledby="s3-title" hidden>
+        <div class="step-head">
+          <span class="step-num">3</span>
+          <div>
+            <p class="step-label">Input mode</p>
+            <h2 id="s3-title">Decide whether voice should be live</h2>
+          </div>
+        </div>
+        <p class="step-body" id="s3-msg" aria-live="polite">
+          Voice commands are optional. Keyboard input stays available either way.
+        </p>
+        <p class="step-note" id="s3-note">
+          If you allow the microphone now, the command bar can listen immediately.
+        </p>
+        <div class="step-state" id="s3-state" data-state="pending"></div>
+        <div class="meter" id="s3-meter" hidden><div class="meter-fill" id="s3-meter-fill"></div></div>
+        <div class="step-actions" id="s3-actions">
+          <button class="btn primary" type="button" data-action="enable-mic">Enable voice</button>
+          <button class="btn ghost" type="button" data-action="skip-mic">Keep keyboard only</button>
+        </div>
+      </section>
+
+      <section class="step" data-step="4" aria-labelledby="s4-title" hidden>
+        <div class="step-head">
+          <span class="step-num">4</span>
+          <div>
+            <p class="step-label">Launch</p>
+            <h2 id="s4-title">Open the command surface</h2>
+          </div>
+        </div>
+        <p class="step-body">
+          Setup will write the local completion marker and send you into the main
+          CHIMERA interface.
+        </p>
+        <p class="step-note">
+          You can revisit voice permissions later from the browser if needed.
+        </p>
+        <div class="step-actions">
+          <button class="btn primary big" type="button" data-action="launch">Launch Chimera</button>
+        </div>
+      </section>
+
+      <nav class="wizard-nav">
+        <button class="btn ghost" type="button" data-action="back" hidden>Back</button>
+      </nav>
+    </section>
+  </main>
+
+  <script type="module" src="/static/js/setup.js"></script>
+</body>
+</html>

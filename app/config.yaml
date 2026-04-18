@@ -1,0 +1,43 @@
+# Project Chimera runtime config. All tunables live here.
+
+ollama:
+  host: "http://localhost:11434"
+  model: "qwen2.5:0.5b"
+  timeout_s: 30.0
+  temperature: 0.1
+
+server:
+  host: "127.0.0.1"
+  port: 8000
+  ws_hz: 15            # dashboard/command-bar broadcast rate
+
+translation:
+  ommatidia:
+    grid: 32           # N x N grid
+    fps: 30
+    region: null       # null = full primary screen; else {top,left,width,height}
+  pressure:
+    hz: 20
+    cpu_weight: 0.6
+    ram_weight: 0.4
+  cursor:
+    hz: 60
+
+# Default policy — can be overridden live by the Executive.
+policy:
+  fly:
+    sensitivity: 0.5           # 0..1, scales looming threshold inversely
+    looming_threshold: 0.35
+  worm:
+    cpu_pain_threshold: 0.85   # fraction 0..1 of CPU %
+    ram_pain_threshold: 0.90
+    poke_derivative: 0.80      # d(pressure)/dt that counts as a "poke" — 0.8 /s avoids psutil jitter firing
+    dwell_ms: 800              # sustained-pressure dwell before AVA fires
+  mouse:
+    track_target_xy: null      # [x, y] or null
+    error_threshold: 120.0     # px prediction error
+    consecutive_frames: 3
+
+actions:
+  kill_process_dry_run: true   # NEVER flip without explicit user ask
+  snap_cursor_enabled: true

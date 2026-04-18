@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CHIMERA (MOCK)</title>
+  <link rel="stylesheet" href="/static/css/tokens.css" />
+  <link rel="stylesheet" href="/static/css/bar.css" />
+</head>
+<body>
+  <div id="conn" class="conn" data-state="online" aria-label="connection"></div>
+
+  <main id="stage" class="stage">
+    <div id="orb" class="orb" data-state="idle" role="button" tabindex="0" aria-label="Talk to Chimera">
+      <div class="orb-core"></div>
+      <div class="orb-bloom"></div>
+      <div class="orb-ring"></div>
+      <div class="orb-glow"></div>
+    </div>
+    <div id="caption" class="caption" aria-live="polite"></div>
+  </main>
+
+  <div id="policy" class="policy" aria-live="polite"></div>
+  <div id="reflexlog" class="reflexlog" aria-live="polite"></div>
+
+  <input id="fallback" class="fallback" type="text"
+         placeholder="Type to Chimera…" autocomplete="off" spellcheck="false"
+         aria-label="Command" />
+
+  <button id="drawer-toggle" class="drawer-toggle" aria-label="Diagnostics">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="16" rx="2"/>
+      <path d="M3 10h18"/><path d="M9 4v16"/>
+    </svg>
+  </button>
+
+  <aside id="drawer" class="drawer" aria-hidden="true">
+    <iframe id="drawer-frame" title="Diagnostics" src="about:blank" loading="lazy"></iframe>
+  </aside>
+  <div id="scrim" class="scrim" aria-hidden="true"></div>
+
+  <script>window.__CHIMERA_MOCK__ = true;</script>
+  <script type="module" src="/static/js/bar.js"></script>
+  <script type="module" src="/static/js/mock-ws.js"></script>
+</body>
+</html>
