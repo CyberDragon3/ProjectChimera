@@ -73,14 +73,20 @@ async def run_app() -> None:
     command_queue: asyncio.Queue[str] = asyncio.Queue()
     stop_event = asyncio.Event()
 
-    # Tier 1 — LLM client chosen by cfg.llm.provider (ollama | openai | anthropic | openai_compat)
-    ollama = exec_layer.build_llm_client(cfg)
+    # Tier 1 — LLM proxy chosen by cfg.llm.provider. The proxy lets the
+    # onboarding wizard hot-swap providers (Ollama↔OpenAI↔Anthropic) without
+    # restarting the app, so a user who finishes setup gets a live Jarvis
+    # on the provider they just picked.
+    ollama = exec_layer.LLMClientProxy(cfg)
     if not await ollama.health():
         log.warning("LLM health check failed — Executive will retry on each call.")
 
     # Dashboard / command-bar server
     from .dashboard.server import build_app, serve
-    app = build_app(snapshot, policy_store, exec_bus, interrupt_bus, command_queue, cfg)
+    app = build_app(
+        snapshot, policy_store, exec_bus, interrupt_bus, command_queue, cfg,
+        llm_proxy=ollama,
+    )
 
     reflex_cfg = cfg.get("reflex") or {}
 

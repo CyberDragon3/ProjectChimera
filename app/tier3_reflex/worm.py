@@ -1,51 +1,104 @@
-"""C. elegans AVA recoil.
+"""C. elegans AVA recoil — spiking neural implementation.
 
-AVA is the command interneuron that drives backward crawl on noxious stimulus.
-Here we model two fire paths:
+The worm's input is a short-horizon history of CPU/RAM pressure and its
+derivative. We feed that history as a rate vector to a tiny SNN. Pain is no
+longer a fixed threshold — it's something the network learns to recognise
+from the user's own load signatures (a heavy build step that the user wants
+is NOT pain; an unexpected fork-bomb IS pain).
 
-1. Sustained pain: CPU pressure stays above `cpu_pain_threshold` for at least
-   `dwell_ms` ms. RAM pressure above `ram_pain_threshold` independently also
-   satisfies "sustained pain" (so a RAM-only leak can trigger too).
-2. Sharp poke: `derivative` (d(pressure)/dt) exceeds `poke_derivative`.
+Learning signal:
+  * Fire, then within ~2 s both CPU and RAM subside → +reward (pain really
+    did go away — the reflex was useful).
+  * Fire, then pressure keeps climbing → −reward (user's workload is
+    legitimately heavy; the brain should learn to tolerate this shape).
 
-500 ms refractory.
+The classic threshold/poke logic remains as a safety-net so a newly-booted
+naïve brain still protects the machine on day 1.
 """
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
+from collections import deque
+from typing import Deque, Optional
+
+import numpy as np
 
 from ..contracts import BioPolicy, InterruptEvent, PressureSample
 from ..event_bus import InterruptBus, PolicyStore, Snapshot, StimulusBus
 from .base import Connectome
+from .neural import BrainConfig, SpikingBrain
+
+
+HISTORY_STEPS = 12          # ~0.5 s @ ~25 Hz pressure sampling
+N_FEATURES_PER_STEP = 4     # cpu, ram, pressure, |derivative|
+FEEDBACK_WINDOW_S = 2.0
 
 
 class WormConnectome(Connectome):
     module = "worm"
-    refractory_s = 0.500  # 500 ms
+    refractory_s = 0.500
 
     def __init__(self) -> None:
-        # Stimulus ns at which CPU/RAM first crossed its threshold; None means
-        # "not currently above threshold".
         self._cpu_high_since_ns: Optional[int] = None
         self._ram_high_since_ns: Optional[int] = None
+        self._history: Deque[tuple[float, float, float, float]] = deque(
+            maxlen=HISTORY_STEPS
+        )
+        self._last_stim_ns: int = 0
+        self.brain = SpikingBrain(
+            name="worm",
+            cfg=BrainConfig(
+                n_in=HISTORY_STEPS * N_FEATURES_PER_STEP,
+                n_hidden=32,
+                target_hidden_rate_hz=4.0,
+                target_readout_rate_hz=0.3,
+            ),
+        )
+        # Queue of (fire_t_ns, cpu_at_fire, ram_at_fire).
+        self._pending_fb: Deque[tuple[int, float, float]] = deque(maxlen=16)
 
-    async def _get_stimulus(
-        self, stim_bus: StimulusBus
-    ) -> Optional[PressureSample]:
+    async def _get_stimulus(self, stim_bus: StimulusBus) -> Optional[PressureSample]:
         try:
             return await asyncio.wait_for(stim_bus.pressure.get(), timeout=0.05)
         except asyncio.TimeoutError:
             return None
 
-    async def _process(
-        self, stim: PressureSample, policy: BioPolicy
-    ) -> Optional[InterruptEvent]:
-        wp = policy.worm
-        dwell_ns = int(wp.dwell_ms) * 1_000_000
-        t = int(stim.t_ns)
+    def _encode(self) -> np.ndarray:
+        if not self._history:
+            return np.zeros(self.brain.cfg.n_in, dtype=np.float32)
+        rows = list(self._history)
+        # Left-pad with the oldest sample so the vector is always fixed-size.
+        while len(rows) < HISTORY_STEPS:
+            rows.insert(0, rows[0])
+        arr = np.asarray(rows, dtype=np.float32).ravel()
+        # CPU/RAM/pressure are already 0..1; derivative magnitude can be big.
+        # Compress with tanh so the rate stays in [0,1].
+        feat = arr.copy()
+        feat[3::N_FEATURES_PER_STEP] = np.tanh(
+            np.abs(arr[3::N_FEATURES_PER_STEP])
+        )
+        return np.clip(feat, 0.0, 1.0)
 
-        # Track CPU dwell
+    async def _process(self, stim: PressureSample, policy: BioPolicy) -> Optional[InterruptEvent]:
+        wp = policy.worm
+        t = int(stim.t_ns)
+        dt = ((t - self._last_stim_ns) / 1e9) if self._last_stim_ns else 0.04
+        self._last_stim_ns = t
+        self._history.append((
+            float(stim.cpu), float(stim.ram),
+            float(stim.pressure), float(stim.derivative),
+        ))
+
+        # Inhibitory gating: a low CPU-pain threshold means "the user said
+        # stay alert" — sensitise the SNN. A high threshold means "the user
+        # is running a heavy build, chill" — numb it.
+        gate = max(0.3, min(2.5, float(wp.cpu_pain_threshold) / 0.85))
+        feat = self._encode()
+        fired, v_o = self.brain.step(feat, dt, gate=gate)
+        self._drain_feedback(t, float(stim.cpu), float(stim.ram))
+
+        # --- Classic dwell / poke heuristic (safety net) ------------------
+        dwell_ns = int(wp.dwell_ms) * 1_000_000
         if stim.cpu > wp.cpu_pain_threshold:
             if self._cpu_high_since_ns is None:
                 self._cpu_high_since_ns = t
@@ -54,7 +107,6 @@ class WormConnectome(Connectome):
             self._cpu_high_since_ns = None
             cpu_sustained = False
 
-        # Track RAM dwell
         if stim.ram > wp.ram_pain_threshold:
             if self._ram_high_since_ns is None:
                 self._ram_high_since_ns = t
@@ -63,37 +115,48 @@ class WormConnectome(Connectome):
             self._ram_high_since_ns = None
             ram_sustained = False
 
-        # Sharp poke — immediate
+        path: Optional[str] = None
         if stim.derivative > wp.poke_derivative:
-            return InterruptEvent(
-                module="worm",
-                kind="ava_recoil",
-                payload={
-                    "cpu": float(stim.cpu),
-                    "ram": float(stim.ram),
-                    "pressure": float(stim.pressure),
-                    "path": "poke",
-                    "derivative": float(stim.derivative),
-                },
-            )
-
-        if cpu_sustained or ram_sustained:
-            # Reset dwell trackers so we don't instantly re-fire after
-            # refractory: the event has been consumed.
+            path = "poke"
+        elif cpu_sustained or ram_sustained:
+            path = "sustained"
             self._cpu_high_since_ns = None
             self._ram_high_since_ns = None
-            return InterruptEvent(
-                module="worm",
-                kind="ava_recoil",
-                payload={
-                    "cpu": float(stim.cpu),
-                    "ram": float(stim.ram),
-                    "pressure": float(stim.pressure),
-                    "path": "sustained",
-                },
-            )
+        if fired and path is None:
+            path = "learned"
 
-        return None
+        if path is None:
+            return None
+
+        self._pending_fb.append((t, float(stim.cpu), float(stim.ram)))
+        return InterruptEvent(
+            module="worm", kind="ava_recoil",
+            payload={
+                "cpu": float(stim.cpu),
+                "ram": float(stim.ram),
+                "pressure": float(stim.pressure),
+                "derivative": float(stim.derivative),
+                "path": path,
+                "brain_fired": bool(fired),
+                "readout_v": round(v_o, 3),
+            },
+        )
+
+    def _drain_feedback(self, t_ns: int, cpu_now: float, ram_now: float) -> None:
+        window_ns = int(FEEDBACK_WINDOW_S * 1e9)
+        while self._pending_fb and (t_ns - self._pending_fb[0][0]) >= window_ns:
+            _, cpu_at_fire, ram_at_fire = self._pending_fb.popleft()
+            pain_before = max(cpu_at_fire, ram_at_fire)
+            pain_now = max(cpu_now, ram_now)
+            if pain_before < 0.1:
+                continue
+            delta = pain_before - pain_now
+            if delta > 0.15:
+                self.brain.deliver_reward(+1.0)
+            elif pain_now > pain_before + 0.05:
+                # Load actually kept climbing — the fire didn't help, user
+                # probably wants this workload to run.
+                self.brain.deliver_reward(-0.5)
 
 
 async def run(

@@ -21,6 +21,7 @@ from typing import Any, Optional
 
 from ..contracts import BioPolicy, InterruptEvent
 from ..event_bus import InterruptBus, PolicyStore, Snapshot, StimulusBus, now_ns
+from .neural import SpikingBrain
 
 
 class Connectome(ABC):
@@ -28,6 +29,10 @@ class Connectome(ABC):
 
     module: str = "base"
     refractory_s: float = 0.0
+    # Subclasses that own a learned SpikingBrain expose it here so the base
+    # loop can handle load/periodic-save/shutdown-save lifecycle for free.
+    brain: SpikingBrain | None = None
+    save_interval_s: float = 30.0
 
     # ---- subclass hooks --------------------------------------------------
 
@@ -66,6 +71,15 @@ class Connectome(ABC):
     ) -> None:
         last_fire_ns: int = 0
         refractory_ns = int(self.refractory_s * 1_000_000_000)
+
+        # Load persisted weights once at startup so learning survives restarts.
+        if self.brain is not None:
+            try:
+                self.brain.load_if_exists()
+            except Exception:
+                pass
+        last_save_ns = now_ns()
+        save_interval_ns = int(self.save_interval_s * 1_000_000_000)
 
         while not stop_event.is_set():
             try:
@@ -111,3 +125,18 @@ class Connectome(ABC):
             self._append_spike(snapshot, t_fire)
             snapshot.recent_interrupts.append(ev)
             await interrupt_bus.publish(ev)
+
+            # Periodic autosave of learned weights. Cheap — small arrays.
+            if self.brain is not None and (t_fire - last_save_ns) > save_interval_ns:
+                try:
+                    self.brain.save()
+                except Exception:
+                    pass
+                last_save_ns = t_fire
+
+        # Clean shutdown — best-effort persist.
+        if self.brain is not None:
+            try:
+                self.brain.save()
+            except Exception:
+                pass

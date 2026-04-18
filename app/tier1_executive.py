@@ -360,6 +360,47 @@ def build_llm_client(cfg: dict) -> LLMClient:
     return OllamaClient(host=host, model=model, timeout_s=timeout_s, temperature=temperature)
 
 
+class LLMClientProxy:
+    """Mutable box around an ``LLMClient`` so the onboarding wizard can
+    hot-swap providers without restarting the app.
+
+    Every callsite holds a reference to the proxy rather than the
+    underlying client. When ``reload(cfg)`` runs we build a new client
+    from the patched config, close the old one, and all outstanding
+    code paths pick up the new client on their next call.
+    """
+
+    def __init__(self, cfg: dict) -> None:
+        self._cfg = cfg
+        self._inner: LLMClient = build_llm_client(cfg)
+
+    @property
+    def inner(self) -> LLMClient:
+        return self._inner
+
+    async def chat(self, messages: list[dict[str, str]]) -> str:
+        return await self._inner.chat(messages)
+
+    async def health(self) -> bool:
+        return await self._inner.health()
+
+    async def close(self) -> None:
+        try:
+            await self._inner.close()
+        except Exception:
+            pass
+
+    async def reload(self, new_cfg: dict) -> None:
+        """Rebuild the underlying client against a freshly-merged config."""
+        old = self._inner
+        self._cfg = new_cfg
+        self._inner = build_llm_client(new_cfg)
+        try:
+            await old.close()
+        except Exception:
+            pass
+
+
 # ---------------------------------------------------------------------------
 # Robust JSON extraction
 # ---------------------------------------------------------------------------

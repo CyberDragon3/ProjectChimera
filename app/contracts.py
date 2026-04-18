@@ -23,7 +23,10 @@ class FlyPolicy:
 class WormPolicy:
     cpu_pain_threshold: float = 0.85
     ram_pain_threshold: float = 0.90
-    poke_derivative: float = 0.25
+    # 0.80 matches the bundled config.yaml default — keeps the reflex from
+    # twitching on ordinary psutil jitter (typical d(pressure)/dt ~ 0.1-0.3
+    # during normal workstation use).
+    poke_derivative: float = 0.80
     dwell_ms: int = 800
 
 

@@ -179,7 +179,18 @@ def _serialize_snapshot(snapshot: Any, policy_store: Any) -> dict[str, Any]:
 # App factory
 # ---------------------------------------------------------------------------
 
-def build_app(snapshot, policy_store, exec_bus, interrupt_bus, command_queue, cfg) -> FastAPI:
+def build_app(
+    snapshot, policy_store, exec_bus, interrupt_bus, command_queue, cfg,
+    llm_proxy=None,
+) -> FastAPI:
+    """Build the FastAPI app.
+
+    ``llm_proxy`` is the shared ``tier1_executive.LLMClientProxy`` held by
+    the executive/action-loop tasks. When the onboarding wizard saves a
+    new provider we ask the proxy to rebuild its inner client so the UX
+    goes from "wizard finished" → "live Jarvis on the new provider"
+    without a process restart.
+    """
     app = FastAPI(title="Project Chimera Dashboard")
 
     # Resolve config access regardless of dict/attr style
@@ -387,10 +398,23 @@ def build_app(snapshot, policy_store, exec_bus, interrupt_bus, command_queue, cf
             })
 
         path = setup_check.save_user_config(merged)
+
+        # Hot-reload the LLM so the user doesn't have to restart after the
+        # wizard. If no proxy was passed (legacy test harness), fall back to
+        # the old "restart required" semantics.
+        reloaded = False
+        if llm_proxy is not None:
+            try:
+                await llm_proxy.reload(merged)
+                reloaded = bool(await llm_proxy.health())
+            except Exception as exc:  # noqa: BLE001
+                log.warning("llm reload failed: %s", exc)
+
         return {
             "ok": True,
             "config_path": str(path),
-            "restart_required": True,
+            "restart_required": not reloaded,
+            "reloaded": reloaded,
             "llm": _redact(merged.get("llm") or {}),
         }
 

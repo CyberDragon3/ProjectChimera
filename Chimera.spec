@@ -71,9 +71,11 @@ hiddenimports = [
     "app.setup_check",
     "app.tier2_translation",
     "app.tier3_reflex",
+    "app.tier3_reflex.base",
     "app.tier3_reflex.fly",
     "app.tier3_reflex.worm",
     "app.tier3_reflex.mouse",
+    "app.tier3_reflex.neural",
     "app.dashboard",
     "app.dashboard.server",
 ]
