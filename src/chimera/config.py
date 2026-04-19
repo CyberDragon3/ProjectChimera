@@ -28,6 +28,10 @@ class Thresholds(_Frozen):
     thermal_slope_c_per_min: float = 2.5
     idle_seconds: int = 300
     reflex_deadline_ms: int = 10
+    thermal_critical_c: float = 95.0
+    thermal_critical_clear_c: float = 90.0
+    thermal_critical_samples: int = 2
+    thermal_critical_max_hold_seconds: int = 300
 
 
 class Poll(_Frozen):
@@ -61,6 +65,12 @@ class Logging(_Frozen):
     format: Literal["json", "console"] = "json"
 
 
+class LysosomeCfg(_Frozen):
+    enabled: bool = True
+    sweep_interval_seconds: int = 600
+    targets: tuple[str, ...] = ()
+
+
 class Settings(_Frozen):
     protected_species: ProtectedSpeciesCfg = Field(default_factory=ProtectedSpeciesCfg)
     thresholds: Thresholds = Field(default_factory=Thresholds)
@@ -69,6 +79,7 @@ class Settings(_Frozen):
     llm: LlmCfg = Field(default_factory=LlmCfg)
     dashboard: Dashboard = Field(default_factory=Dashboard)
     logging: Logging = Field(default_factory=Logging)
+    lysosome: LysosomeCfg = Field(default_factory=LysosomeCfg)
 
 
 def load(path: Path) -> Settings:

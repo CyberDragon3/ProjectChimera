@@ -32,6 +32,11 @@ cpu_sustained_seconds = 1.0        # seconds above threshold before reflex fires
 thermal_slope_c_per_min = 2.5      # °C/min — Zebrafish alert
 idle_seconds = 300                 # seconds of input inactivity = "away"
 reflex_deadline_ms = 10            # hard deadline per reflex tick
+# — Zebrafish hard-floor (design §5.1)
+# thermal_critical_c = 95.0
+# thermal_critical_clear_c = 90.0
+# thermal_critical_samples = 2
+# thermal_critical_max_hold_seconds = 300
 
 [poll]
 cpu_interval_ms = 250
@@ -58,3 +63,8 @@ port = 8765
 [logging]
 level = "INFO"
 format = "json"                    # "json" | "console"
+
+[lysosome]
+enabled = true
+sweep_interval_seconds = 600   # don't re-sweep within 10 min
+targets = []                    # opt-in exe names for phase-3 kill
