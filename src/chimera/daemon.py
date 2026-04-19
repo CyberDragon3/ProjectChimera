@@ -212,7 +212,29 @@ class Chimera:
 
             from chimera.dashboard.app import create_app
 
-            app = create_app(self.bus, self.thermal_buf)
+            try:
+                from chimera.brains import BRAINS_AVAILABLE  # type: ignore[import-not-found]
+            except Exception:
+                BRAINS_AVAILABLE = {
+                    "psutil": True,
+                    "owmeta": False,
+                    "bmtk": False,
+                    "flygym": False,
+                }
+
+            runtime_flags = {
+                "neuro_enabled": bool(s.neuro.enabled),
+                "lysosome_enabled": bool(s.lysosome.enabled),
+                "dashboard_enabled": bool(s.dashboard.enabled),
+            }
+
+            app = create_app(
+                self.bus,
+                self.thermal_buf,
+                protected_species=frozenset(self.safety.members),
+                brains_available=BRAINS_AVAILABLE,
+                runtime_flags=runtime_flags,
+            )
             config = uvicorn.Config(
                 app,
                 host=s.dashboard.host,

@@ -2,77 +2,674 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Chimera</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Chimera — homeostasis</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
   :root {
     color-scheme: dark;
-    --bg: #0b0d0f;
-    --fg: #d9dde2;
+    --bg: #0a0e12;
+    --panel: #111821;
+    --panel-2: #0e141c;
+    --fg: #d8dee9;
     --dim: #7d8794;
     --accent: #52d3b2;
     --warn: #f3b13a;
     --crit: #e85d6b;
+    --muted: #1f2933;
+    --rad: 10px;
   }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
   body {
-    margin: 0;
-    padding: 16px 24px;
-    font-family: "JetBrains Mono", "SF Mono", Consolas, monospace;
+    font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
     background: var(--bg);
     color: var(--fg);
+    font-size: 13px;
+    line-height: 1.4;
+    padding: 1.25rem 1.5rem 2rem;
   }
-  h1 { font-size: 14px; letter-spacing: 2px; margin: 0 0 12px; color: var(--accent); }
-  h1 small { color: var(--dim); margin-left: 8px; font-weight: normal; letter-spacing: 0; }
-  #board { display: grid; grid-template-columns: 1fr 320px; gap: 16px; }
-  #feed { height: 80vh; overflow-y: auto; border-left: 1px solid #1e2329; padding-left: 12px; }
-  .row { display: flex; gap: 12px; font-size: 12px; padding: 2px 0; white-space: pre-wrap; }
-  .topic { color: var(--accent); min-width: 200px; }
-  .topic.reflex\.worm\.throttle { color: var(--warn); }
-  .topic.safety\.denied { color: var(--crit); }
-  .topic.thermal\.rising { color: var(--crit); }
-  .ts { color: var(--dim); min-width: 72px; }
-  #panel { border: 1px solid #1e2329; border-radius: 8px; padding: 12px; }
-  .stat { display: flex; justify-content: space-between; padding: 4px 0; font-size: 12px; }
-  .stat span:first-child { color: var(--dim); }
+  .mono { font-family: "JetBrains Mono", "SF Mono", Consolas, monospace; }
+
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--muted);
+    padding-bottom: 0.75rem; margin-bottom: 1rem;
+  }
+  header h1 {
+    font-size: 0.9rem; letter-spacing: 3px;
+    margin: 0; color: var(--accent); font-weight: 600;
+  }
+  header h1 small { color: var(--dim); margin-left: 0.6rem; letter-spacing: 0.5px; font-weight: 400; }
+  .live-pill {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    font-size: 0.7rem; letter-spacing: 2px; color: var(--dim);
+    padding: 0.25rem 0.6rem; border: 1px solid var(--muted); border-radius: 999px;
+  }
+  .live-pill .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--crit);
+    box-shadow: 0 0 8px var(--crit);
+  }
+  .live-pill.connected .dot { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  .grid { display: grid; gap: 1rem; }
+  .row-animals { grid-template-columns: repeat(4, 1fr); }
+  .row-metrics { grid-template-columns: 320px 1fr; }
+  .row-metrics-2 { grid-template-columns: 1fr 1fr; }
+  .row-lists { grid-template-columns: 320px 1fr; }
+  @media (max-width: 1024px) {
+    .row-animals { grid-template-columns: repeat(2, 1fr); }
+    .row-metrics, .row-metrics-2, .row-lists { grid-template-columns: 1fr; }
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--muted);
+    border-radius: var(--rad);
+    padding: 0.9rem 1rem;
+  }
+  .panel h2 {
+    font-size: 0.7rem; letter-spacing: 2px; color: var(--dim);
+    margin: 0 0 0.6rem; text-transform: uppercase; font-weight: 500;
+  }
+
+  .animal {
+    position: relative;
+    transition: border-color 0.25s, box-shadow 0.25s;
+  }
+  .animal .name {
+    font-size: 0.75rem; letter-spacing: 1.5px; color: var(--accent);
+    font-weight: 600; text-transform: uppercase;
+  }
+  .animal .sub { font-size: 0.7rem; color: var(--dim); margin-bottom: 0.35rem; }
+  .animal .big { font-size: 1.6rem; font-weight: 600; color: var(--fg); }
+  .animal .big small { font-size: 0.7rem; color: var(--dim); font-weight: 400; margin-left: 0.25rem; }
+  .animal .bar {
+    display: flex; gap: 2px; margin-top: 0.5rem;
+  }
+  .animal .bar span {
+    flex: 1; height: 6px; background: var(--muted); border-radius: 2px;
+  }
+  .animal .bar span.on { background: var(--accent); }
+  .animal .badge {
+    position: absolute; top: 0.6rem; right: 0.6rem;
+    font-size: 0.6rem; letter-spacing: 1px; color: var(--bg);
+    background: var(--accent); padding: 0.1rem 0.4rem; border-radius: 3px;
+    display: none;
+  }
+  .animal.flash { border-color: var(--accent); box-shadow: 0 0 12px rgba(82, 211, 178, 0.4); }
+  .animal.flash-warn { border-color: var(--warn); box-shadow: 0 0 12px rgba(243, 177, 58, 0.4); }
+
+  .gauge-wrap { display: flex; gap: 1rem; align-items: center; }
+  .gauge { width: 120px; height: 120px; }
+  .gauge-ring { fill: none; stroke-width: 10; }
+  .gauge-track { stroke: var(--muted); }
+  .gauge-fill { stroke: var(--accent); stroke-linecap: round; transition: stroke-dashoffset 0.4s; }
+  .gauge-label {
+    fill: var(--fg); font-size: 18px; text-anchor: middle;
+    font-family: "JetBrains Mono", monospace;
+  }
+  .gauge-sub { fill: var(--dim); font-size: 8px; text-anchor: middle; letter-spacing: 1px; }
+  .gauge-info .label { color: var(--dim); font-size: 0.7rem; letter-spacing: 1px; text-transform: uppercase; }
+  .gauge-info .value { font-size: 1.1rem; font-family: "JetBrains Mono", monospace; color: var(--fg); }
+  .gauge-info .outcome { margin-top: 0.4rem; font-size: 0.7rem; color: var(--dim); }
+
+  .chart-box { height: 180px; position: relative; }
+  .raster { height: 120px; }
+
+  ul.compact { list-style: none; padding: 0; margin: 0; max-height: 280px; overflow-y: auto; }
+  ul.compact li {
+    padding: 0.25rem 0.4rem; font-size: 0.75rem;
+    border-bottom: 1px solid var(--panel-2);
+    font-family: "JetBrains Mono", monospace;
+    color: var(--fg);
+  }
+  ul.compact li:hover { background: var(--panel-2); }
+
+  input.search {
+    width: 100%; background: var(--panel-2); border: 1px solid var(--muted);
+    border-radius: 6px; color: var(--fg); padding: 0.35rem 0.5rem;
+    font-size: 0.75rem; font-family: inherit; margin-bottom: 0.5rem;
+    outline: none;
+  }
+  input.search:focus { border-color: var(--accent); }
+
+  .feed { max-height: 360px; overflow-y: auto; }
+  .feed .row {
+    display: grid; grid-template-columns: 72px 200px 1fr;
+    gap: 0.5rem; padding: 0.2rem 0; font-size: 0.72rem;
+    font-family: "JetBrains Mono", monospace;
+    border-bottom: 1px solid var(--panel-2);
+  }
+  .feed .ts { color: var(--dim); }
+  .feed .topic { color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .feed .topic.warn { color: var(--warn); }
+  .feed .topic.crit { color: var(--crit); }
+  .feed .payload { color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; }
+  .toggles { display: flex; gap: 1rem; flex-wrap: wrap; }
+  .toggle {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    padding: 0.3rem 0.6rem; background: var(--panel-2);
+    border: 1px solid var(--muted); border-radius: 6px;
+    cursor: pointer; font-size: 0.75rem; user-select: none;
+  }
+  .toggle input { accent-color: var(--accent); }
+  .toggle .note { color: var(--dim); font-size: 0.65rem; margin-left: 0.3rem; }
+  .actions { display: flex; gap: 0.5rem; }
+  button.btn {
+    background: var(--panel-2); color: var(--fg);
+    border: 1px solid var(--muted); border-radius: 6px;
+    padding: 0.4rem 0.8rem; font-size: 0.75rem; cursor: pointer;
+    font-family: inherit; letter-spacing: 0.5px;
+    transition: all 0.15s;
+  }
+  button.btn:hover { border-color: var(--accent); color: var(--accent); }
+  button.btn:active { transform: translateY(1px); }
+  button.btn.warn:hover { border-color: var(--warn); color: var(--warn); }
+
+  .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.4rem 1rem; }
+  .stat { display: flex; justify-content: space-between; font-size: 0.75rem; padding: 0.1rem 0; }
+  .stat .k { color: var(--dim); }
+  .stat .v { font-family: "JetBrains Mono", monospace; }
+
+  .brains { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .brain-chip {
+    padding: 0.15rem 0.5rem; border-radius: 3px;
+    background: var(--panel-2); border: 1px solid var(--muted);
+    font-size: 0.65rem; letter-spacing: 1px; text-transform: uppercase;
+    color: var(--dim);
+  }
+  .brain-chip.on { color: var(--accent); border-color: var(--accent); }
+
+  section { margin-bottom: 1rem; }
+  .empty { color: var(--dim); font-size: 0.75rem; font-style: italic; padding: 0.5rem 0; }
 </style>
 </head>
 <body>
+<header>
   <h1>CHIMERA <small>biologically-inspired homeostasis</small></h1>
-  <div id="board">
-    <div id="feed"></div>
-    <div id="panel">
-      <div class="stat"><span>thermal</span><span id="thermal">—</span></div>
-      <div class="stat"><span>slope (°C/min)</span><span id="slope">—</span></div>
-      <div class="stat"><span>samples</span><span id="samples">—</span></div>
-      <div class="stat"><span>events received</span><span id="count">0</span></div>
+  <div class="live-pill" id="live"><span class="dot"></span><span id="live-text">CONNECTING</span></div>
+</header>
+
+<section>
+  <div class="grid row-animals">
+    <div class="panel animal" id="a-worm">
+      <span class="badge" id="worm-badge">THROTTLE</span>
+      <div class="name">Worm</div>
+      <div class="sub">0 neurons · reflex</div>
+      <div class="big"><span id="worm-val">idle</span></div>
+      <div class="bar" id="worm-bar"></div>
+    </div>
+    <div class="panel animal" id="a-zebrafish">
+      <div class="name">Zebrafish</div>
+      <div class="sub">1 LIF · thermal</div>
+      <div class="big"><span id="zeb-val">—</span><small>°C</small></div>
+      <div class="bar" id="zeb-bar"></div>
+    </div>
+    <div class="panel animal" id="a-fly">
+      <div class="name">Fly</div>
+      <div class="sub">1 LIF + noise · arousal</div>
+      <div class="big"><span id="fly-val">still</span></div>
+      <div class="bar" id="fly-bar"></div>
+    </div>
+    <div class="panel animal" id="a-mouse">
+      <span class="badge" id="mouse-badge">PROTECTING</span>
+      <div class="name">Mouse</div>
+      <div class="sub">100 E/I · cortex</div>
+      <div class="big"><span id="mouse-val">0.0</span><small>Hz</small></div>
+      <div class="bar" id="mouse-bar"></div>
     </div>
   </div>
+</section>
+
+<section>
+  <div class="grid row-metrics">
+    <div class="panel">
+      <h2>Dopamine</h2>
+      <div class="gauge-wrap">
+        <svg class="gauge" viewBox="0 0 120 120">
+          <circle class="gauge-ring gauge-track" cx="60" cy="60" r="50"></circle>
+          <circle class="gauge-ring gauge-fill" id="dopa-ring"
+            cx="60" cy="60" r="50"
+            stroke-dasharray="314.159" stroke-dashoffset="314.159"
+            transform="rotate(-90 60 60)"></circle>
+          <text class="gauge-label" x="60" y="64" id="dopa-level">0.00</text>
+          <text class="gauge-sub" x="60" y="80">LEVEL</text>
+        </svg>
+        <div class="gauge-info">
+          <div class="label">Hit rate</div>
+          <div class="value"><span id="dopa-hit">—</span>%</div>
+          <div class="outcome" id="dopa-outcome">awaiting outcomes…</div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>CPU · last 60s</h2>
+      <div class="chart-box"><canvas id="chart-cpu"></canvas></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="grid row-metrics-2">
+    <div class="panel">
+      <h2>Thermal · last 60s</h2>
+      <div class="chart-box"><canvas id="chart-thermal"></canvas></div>
+      <div class="stats-grid" style="margin-top:0.6rem">
+        <div class="stat"><span class="k">latest</span><span class="v" id="thermal-latest">—</span></div>
+        <div class="stat"><span class="k">slope °C/min</span><span class="v" id="thermal-slope">—</span></div>
+        <div class="stat"><span class="k">samples</span><span class="v" id="thermal-samples">—</span></div>
+        <div class="stat"><span class="k">bus drops</span><span class="v" id="bus-drops">—</span></div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Mouse raster · last 2s</h2>
+      <div class="raster"><canvas id="chart-raster"></canvas></div>
+      <div class="stats-grid" style="margin-top:0.6rem">
+        <div class="stat"><span class="k">E rate</span><span class="v" id="rate-e">—</span></div>
+        <div class="stat"><span class="k">I rate</span><span class="v" id="rate-i">—</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="grid row-lists">
+    <div class="panel">
+      <h2>Protected species · <span id="prot-count">0</span></h2>
+      <input class="search" id="prot-search" placeholder="search…" />
+      <ul class="compact" id="prot-list"></ul>
+    </div>
+    <div class="panel">
+      <h2>Event feed</h2>
+      <input class="search" id="feed-search" placeholder="filter by topic substring…" />
+      <div class="feed" id="feed"></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="panel">
+    <h2>Systems</h2>
+    <div class="controls">
+      <div class="toggles" id="toggles"></div>
+      <div class="actions">
+        <button class="btn" onclick="forceLysosome()">Force Lysosome Sweep</button>
+        <button class="btn warn" onclick="resetDopamine()">Reset Dopamine</button>
+      </div>
+    </div>
+    <div style="margin-top: 0.75rem;">
+      <div style="color: var(--dim); font-size: 0.7rem; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 0.4rem;">Brains available</div>
+      <div class="brains" id="brains"></div>
+    </div>
+  </div>
+</section>
+
 <script>
-  const feed = document.getElementById("feed");
-  const countEl = document.getElementById("count");
-  let count = 0;
-  const src = new EventSource("/events");
-  src.onmessage = e => {
-    const d = JSON.parse(e.data);
-    const t = new Date().toLocaleTimeString();
-    const row = document.createElement("div");
-    row.className = "row";
-    row.innerHTML = `<span class="ts">${t}</span>` +
-      `<span class="topic ${d.topic}">${d.topic}</span>` +
-      `<span>${JSON.stringify(d.payload)}</span>`;
-    feed.prepend(row);
-    while (feed.childElementCount > 300) feed.removeChild(feed.lastChild);
-    countEl.textContent = ++count;
+(() => {
+  "use strict";
+
+  // ---------- chart helpers ----------
+  const baseOpts = {
+    animation: false,
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: {
+        type: "linear",
+        ticks: { color: "#7d8794", font: { size: 10 } },
+        grid: { color: "#1f2933" },
+      },
+      y: {
+        ticks: { color: "#7d8794", font: { size: 10 } },
+        grid: { color: "#1f2933" },
+      },
+    },
   };
+
+  const cpuBuffer = []; // {t, v}
+  const thermalBuffer = [];
+  const rasterBuffer = []; // {t, n, size}
+  const MAX_SECONDS = 60;
+
+  function pruneBuffer(buf, seconds) {
+    const cutoff = (performance.now() / 1000) - seconds;
+    while (buf.length && buf[0].t < cutoff) buf.shift();
+  }
+
+  const cpuChart = new Chart(document.getElementById("chart-cpu"), {
+    type: "line",
+    data: { datasets: [{
+      label: "CPU",
+      data: [],
+      borderColor: "#52d3b2",
+      backgroundColor: "rgba(82, 211, 178, 0.15)",
+      borderWidth: 1.5,
+      pointRadius: 0,
+      fill: true,
+      tension: 0.25,
+    }] },
+    options: { ...baseOpts,
+      scales: {
+        ...baseOpts.scales,
+        y: { ...baseOpts.scales.y, suggestedMin: 0, suggestedMax: 100 },
+      },
+    },
+  });
+
+  const thermalChart = new Chart(document.getElementById("chart-thermal"), {
+    type: "line",
+    data: { datasets: [{
+      label: "°C",
+      data: [],
+      borderColor: "#f3b13a",
+      backgroundColor: "rgba(243, 177, 58, 0.12)",
+      borderWidth: 1.5,
+      pointRadius: 0,
+      fill: true,
+      tension: 0.25,
+    }] },
+    options: { ...baseOpts },
+  });
+
+  const rasterChart = new Chart(document.getElementById("chart-raster"), {
+    type: "scatter",
+    data: { datasets: [{
+      label: "spikes",
+      data: [],
+      backgroundColor: "#52d3b2",
+      borderColor: "#52d3b2",
+    }] },
+    options: { ...baseOpts,
+      scales: {
+        x: { ...baseOpts.scales.x, min: -2, max: 0, title: { display: false } },
+        y: {
+          ...baseOpts.scales.y,
+          min: -0.5, max: 19.5,
+          ticks: { color: "#7d8794", font: { size: 9 }, stepSize: 5 },
+        },
+      },
+    },
+  });
+
+  function pushCpu(v) {
+    const t = performance.now() / 1000;
+    cpuBuffer.push({ t, v });
+    pruneBuffer(cpuBuffer, MAX_SECONDS);
+    cpuChart.data.datasets[0].data = cpuBuffer.map(p => ({ x: p.t - t, y: p.v }));
+    cpuChart.update("none");
+  }
+
+  function pushThermal(v) {
+    const t = performance.now() / 1000;
+    thermalBuffer.push({ t, v });
+    pruneBuffer(thermalBuffer, MAX_SECONDS);
+    thermalChart.data.datasets[0].data = thermalBuffer.map(p => ({ x: p.t - t, y: p.v }));
+    thermalChart.update("none");
+  }
+
+  function pushRaster(rateHz) {
+    // Fake 20 neurons. Probability of firing in this tick proportional to rate.
+    const t = performance.now() / 1000;
+    const N = 20;
+    const perNeuron = Math.min(1, rateHz / 30);
+    for (let i = 0; i < N; i++) {
+      if (Math.random() < perNeuron) {
+        rasterBuffer.push({ t, n: i });
+      }
+    }
+    // Prune older than 2s.
+    const cutoff = t - 2;
+    while (rasterBuffer.length && rasterBuffer[0].t < cutoff) rasterBuffer.shift();
+    rasterChart.data.datasets[0].data = rasterBuffer.map(p => ({ x: p.t - t, y: p.n }));
+    rasterChart.update("none");
+  }
+
+  // ---------- animal card helpers ----------
+  function setBar(id, frac) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const n = 6;
+    const filled = Math.max(0, Math.min(n, Math.round(frac * n)));
+    el.innerHTML = "";
+    for (let i = 0; i < n; i++) {
+      const s = document.createElement("span");
+      if (i < filled) s.className = "on";
+      el.appendChild(s);
+    }
+  }
+  setBar("worm-bar", 0);
+  setBar("zeb-bar", 0);
+  setBar("fly-bar", 0);
+  setBar("mouse-bar", 0);
+
+  function flash(id, warn = false) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove("flash", "flash-warn");
+    // force reflow to restart transition
+    void el.offsetWidth;
+    el.classList.add(warn ? "flash-warn" : "flash");
+    setTimeout(() => el.classList.remove("flash", "flash-warn"), 800);
+  }
+
+  // ---------- dopamine gauge ----------
+  const RING_CIRC = 2 * Math.PI * 50; // ~314.159
+  function setDopamine(level, hitRate, outcome) {
+    const lv = Math.max(0, Math.min(1, level ?? 0));
+    const ring = document.getElementById("dopa-ring");
+    ring.setAttribute("stroke-dashoffset", (RING_CIRC * (1 - lv)).toFixed(2));
+    document.getElementById("dopa-level").textContent = lv.toFixed(2);
+    if (hitRate != null) {
+      document.getElementById("dopa-hit").textContent = (hitRate * 100).toFixed(0);
+    }
+    if (outcome != null) {
+      document.getElementById("dopa-outcome").textContent = "last: " + outcome;
+    }
+  }
+  setDopamine(0, 0.5, null);
+
+  // ---------- event feed ----------
+  const feedEl = document.getElementById("feed");
+  const feedSearch = document.getElementById("feed-search");
+  const feedStore = []; // newest first
+  const MAX_FEED = 200;
+  function renderFeed() {
+    const q = feedSearch.value.trim().toLowerCase();
+    const filtered = q ? feedStore.filter(r => r.topic.toLowerCase().includes(q)) : feedStore;
+    const rows = filtered.slice(0, 200).map(r => {
+      const tsClass = r.topic.includes("crit") || r.topic.includes("denied")
+        ? "crit"
+        : r.topic.includes("warn") || r.topic.includes("throttle") || r.topic.includes("spike")
+        ? "warn"
+        : "";
+      return `<div class="row"><span class="ts">${r.time}</span><span class="topic ${tsClass}">${r.topic}</span><span class="payload">${r.payload}</span></div>`;
+    }).join("");
+    feedEl.innerHTML = rows || '<div class="empty">no events match.</div>';
+  }
+  feedSearch.addEventListener("input", renderFeed);
+
+  function appendFeed(topic, payload) {
+    const now = new Date();
+    const time = now.toTimeString().slice(0, 8);
+    feedStore.unshift({ topic, payload: JSON.stringify(payload), time });
+    while (feedStore.length > MAX_FEED) feedStore.pop();
+    renderFeed();
+  }
+
+  // ---------- SSE routing ----------
+  const livePill = document.getElementById("live");
+  const liveText = document.getElementById("live-text");
+  let sse;
+  function connectSSE() {
+    sse = new EventSource("/events");
+    sse.onopen = () => {
+      livePill.classList.add("connected");
+      liveText.textContent = "LIVE";
+    };
+    sse.onerror = () => {
+      livePill.classList.remove("connected");
+      liveText.textContent = "RECONNECTING";
+    };
+    sse.onmessage = e => {
+      let d;
+      try { d = JSON.parse(e.data); } catch { return; }
+      const { topic, payload } = d;
+      appendFeed(topic, payload);
+
+      if (topic === "cpu.spike") {
+        const v = payload && payload.total_percent;
+        if (typeof v === "number") pushCpu(v);
+        flash("a-worm", true);
+      } else if (topic === "cpu.sample") {
+        const v = payload && payload.total_percent;
+        if (typeof v === "number") pushCpu(v);
+      } else if (topic === "thermal.sample") {
+        const v = payload && (payload.celsius ?? payload.c ?? payload.value);
+        if (typeof v === "number") pushThermal(v);
+      } else if (topic === "thermal.rising" || topic === "thermal.critical") {
+        flash("a-zebrafish", true);
+      } else if (topic === "neuro.zebrafish.spike") {
+        flash("a-zebrafish");
+      } else if (topic === "neuro.fly.spike") {
+        flash("a-fly");
+        document.getElementById("fly-val").textContent = "spike";
+      } else if (topic === "neuro.mouse.rate") {
+        const e = payload.e_rate_hz ?? 0;
+        const i = payload.i_rate_hz ?? 0;
+        document.getElementById("mouse-val").textContent = e.toFixed(1);
+        document.getElementById("rate-e").textContent = e.toFixed(2) + " Hz";
+        document.getElementById("rate-i").textContent = i.toFixed(2) + " Hz";
+        setBar("mouse-bar", Math.min(1, e / 30));
+        pushRaster(e);
+      } else if (topic === "neuro.dopamine") {
+        setDopamine(payload.level, payload.hit_rate, payload.last_outcome);
+      } else if (topic === "reflex.worm.throttle") {
+        flash("a-worm", true);
+        document.getElementById("worm-val").textContent = "throttle";
+        const badge = document.getElementById("worm-badge");
+        badge.style.display = "inline-block";
+        setTimeout(() => { badge.style.display = "none"; }, 2000);
+      } else if (topic === "cortex.protect_foreground") {
+        const on = !!payload.enabled;
+        const badge = document.getElementById("mouse-badge");
+        badge.style.display = on ? "inline-block" : "none";
+      } else if (topic === "fly.arousal") {
+        const level = payload.level ?? 0;
+        document.getElementById("fly-val").textContent = level > 0.5 ? "aroused" : "still";
+        setBar("fly-bar", level);
+      }
+    };
+  }
+  connectSSE();
+
+  // ---------- periodic /state refresh ----------
+  const protList = document.getElementById("prot-list");
+  const protSearch = document.getElementById("prot-search");
+  const protCount = document.getElementById("prot-count");
+  let protectedSpecies = [];
+
+  function renderProtected() {
+    const q = protSearch.value.trim().toLowerCase();
+    const filtered = q ? protectedSpecies.filter(p => p.toLowerCase().includes(q)) : protectedSpecies;
+    protList.innerHTML = filtered.length
+      ? filtered.map(p => `<li>${p}</li>`).join("")
+      : '<li class="empty">none</li>';
+  }
+  protSearch.addEventListener("input", renderProtected);
+
+  const togglesEl = document.getElementById("toggles");
+  const brainsEl = document.getElementById("brains");
+
+  function renderToggles(flags) {
+    if (!togglesEl.dataset.ready) {
+      togglesEl.innerHTML = "";
+      Object.entries(flags).forEach(([k, v]) => {
+        const label = k.replace("_enabled", "");
+        const wrap = document.createElement("label");
+        wrap.className = "toggle";
+        wrap.innerHTML = `<input type="checkbox" data-flag="${k}" ${v ? "checked" : ""} />
+          <span>${label}</span> <span class="note">(next restart)</span>`;
+        wrap.querySelector("input").addEventListener("change", async (e) => {
+          const enabled = e.target.checked;
+          try {
+            await fetch(`/control/toggle/${label}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ enabled }),
+            });
+          } catch {}
+        });
+        togglesEl.appendChild(wrap);
+      });
+      togglesEl.dataset.ready = "1";
+    }
+  }
+
+  function renderBrains(brains) {
+    brainsEl.innerHTML = Object.entries(brains).map(
+      ([k, v]) => `<span class="brain-chip ${v ? "on" : ""}">${k}${v ? " · ok" : " · missing"}</span>`
+    ).join("") || '<span class="empty">no brain info</span>';
+  }
+
   async function refresh() {
     try {
-      const r = await fetch("/state"); const j = await r.json();
-      document.getElementById("thermal").textContent =
-        j.thermal.latest_c != null ? j.thermal.latest_c.toFixed(1) + " °C" : "n/a";
-      document.getElementById("slope").textContent = j.thermal.slope_c_per_min.toFixed(2);
-      document.getElementById("samples").textContent = j.thermal.samples;
+      const r = await fetch("/state");
+      if (!r.ok) return;
+      const j = await r.json();
+      // thermal
+      const th = j.thermal || {};
+      document.getElementById("thermal-latest").textContent =
+        th.latest_c != null ? th.latest_c.toFixed(1) + " °C" : "—";
+      document.getElementById("thermal-slope").textContent =
+        typeof th.slope_c_per_min === "number" ? th.slope_c_per_min.toFixed(2) : "—";
+      document.getElementById("thermal-samples").textContent = th.samples ?? "—";
+      if (typeof th.latest_c === "number") {
+        document.getElementById("zeb-val").textContent = th.latest_c.toFixed(1);
+        // map 40..90 to bar fraction
+        const frac = Math.max(0, Math.min(1, (th.latest_c - 40) / 50));
+        setBar("zeb-bar", frac);
+      }
+      // neuro
+      const n = j.neuro || {};
+      if (n.dopamine) setDopamine(n.dopamine.level, n.dopamine.hit_rate, n.dopamine.last_outcome);
+      if (n.mouse_rate) {
+        const e = n.mouse_rate.e_rate_hz ?? 0;
+        document.getElementById("rate-e").textContent = e.toFixed(2) + " Hz";
+        document.getElementById("rate-i").textContent = (n.mouse_rate.i_rate_hz ?? 0).toFixed(2) + " Hz";
+      }
+      // protected
+      if (Array.isArray(j.protected_species)) {
+        protectedSpecies = j.protected_species;
+        protCount.textContent = protectedSpecies.length;
+        renderProtected();
+      }
+      // brains + flags (one-shot render)
+      if (j.brains_available) renderBrains(j.brains_available);
+      if (j.runtime_flags) renderToggles(j.runtime_flags);
+      // heartbeat: drops
+      const dropEv = (j.recent_events || []).filter(e => e.topic === "chimera.heartbeat").slice(-1)[0];
+      if (dropEv && dropEv.payload && typeof dropEv.payload.dropped === "number") {
+        document.getElementById("bus-drops").textContent = dropEv.payload.dropped;
+      }
     } catch {}
   }
-  refresh(); setInterval(refresh, 5000);
+  refresh();
+  setInterval(refresh, 2000);
+
+  // ---------- controls ----------
+  window.forceLysosome = async () => {
+    try { await fetch("/control/lysosome/trigger", { method: "POST" }); } catch {}
+  };
+  window.resetDopamine = async () => {
+    try { await fetch("/control/dopamine/reset", { method: "POST" }); } catch {}
+  };
+})();
 </script>
 </body>
 </html>

@@ -89,7 +89,10 @@ def test_neuro_cfg_extra_forbidden() -> None:
 def test_default_toml_loads_with_neuro_section() -> None:
     s = load_default()
     assert isinstance(s, Settings)
-    assert s.neuro.enabled is False
+    # Shipped TOML enables the neuro path by default so new users see the
+    # full Chimera capability on first run. The pydantic field default
+    # remains False so omitting the section entirely still yields legacy.
+    assert s.neuro.enabled is True
 
 
 def test_toml_neuro_override(tmp_path: Path) -> None:

@@ -72,8 +72,9 @@ targets = []                    # opt-in exe names for phase-3 kill
 
 [neuro]
 # GLIF spiking-neuron layer (Evolution: Brainstem→Cortex with dopamine reward).
-# Set enabled = true to switch Zebrafish/Fly/Mouse to neural models.
-enabled = false
+# Default ON — 102-neuron pure-numpy model runs at ~15 µs/step. Set to false to
+# fall back to the legacy hard-coded reflexes.
+enabled = true
 # tick_hz = 50
 # tau_m_ms = 20.0
 # v_rest_mv = -65.0

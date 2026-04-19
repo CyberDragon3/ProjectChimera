@@ -41,6 +41,14 @@ dev = [
     "mypy>=1.8",
     "hypothesis>=6.98",
 ]
+# Optional "full bio-fidelity" frameworks. Heavy installs (NEURON, MuJoCo,
+# transitive native deps). All adapters degrade gracefully when absent —
+# the daemon runs at full performance without any of these.
+brains = [
+    "owmeta>=0.12",          # C. elegans 302-neuron connectome (Worm)
+    "bmtk>=1.1",             # Allen Institute Brain Modeling Toolkit (Mouse GLIF)
+    "flygym[examples]>=1.0", # MuJoCo fruit-fly biomechanics (Fly)
+]
 
 [project.scripts]
 chimera = "chimera.__main__:main"
