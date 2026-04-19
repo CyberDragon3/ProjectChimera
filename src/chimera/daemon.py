@@ -155,6 +155,10 @@ class Chimera:
             self.bus,
             self.thermal_buf,
             slope_c_per_min_threshold=s.thresholds.thermal_slope_c_per_min,
+            critical_c=s.thresholds.thermal_critical_c,
+            critical_clear_c=s.thresholds.thermal_critical_clear_c,
+            critical_samples=s.thresholds.thermal_critical_samples,
+            max_hold_seconds=s.thresholds.thermal_critical_max_hold_seconds,
             interval_ms=s.poll.thermal_interval_ms,
         )
         mouse = MouseReflex(self.bus)

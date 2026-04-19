@@ -52,3 +52,11 @@ def test_window_filters_by_age() -> None:
     rb.append(2.0, ts=t0)
     # Older sample is evicted because it's older than max_seconds.
     assert len(rb.window(60)) == 1
+
+
+def test_ring_buffer_last_n() -> None:
+    buf = RingBuffer(max_seconds=60)
+    for c in (1.0, 2.0, 3.0, 4.0):
+        buf.append(c)
+    assert buf.last_n(2) == [3.0, 4.0]
+    assert buf.last_n(10) == [1.0, 2.0, 3.0, 4.0]

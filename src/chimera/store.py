@@ -45,6 +45,13 @@ class RingBuffer:
         cutoff = now - seconds
         return [s for s in self._buf if s.t >= cutoff]
 
+    def last_n(self, n: int) -> list[float]:
+        """Return up to the last ``n`` raw values — most recent last."""
+        if n <= 0:
+            return []
+        items = list(self._buf)[-n:]
+        return [s.v for s in items]
+
     def slope(self, seconds: float) -> float:
         """Linear slope (value-units per second) over the last ``seconds``.
 
