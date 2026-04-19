@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Chimera</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b0d0f;
+    --fg: #d9dde2;
+    --dim: #7d8794;
+    --accent: #52d3b2;
+    --warn: #f3b13a;
+    --crit: #e85d6b;
+  }
+  body {
+    margin: 0;
+    padding: 16px 24px;
+    font-family: "JetBrains Mono", "SF Mono", Consolas, monospace;
+    background: var(--bg);
+    color: var(--fg);
+  }
+  h1 { font-size: 14px; letter-spacing: 2px; margin: 0 0 12px; color: var(--accent); }
+  h1 small { color: var(--dim); margin-left: 8px; font-weight: normal; letter-spacing: 0; }
+  #board { display: grid; grid-template-columns: 1fr 320px; gap: 16px; }
+  #feed { height: 80vh; overflow-y: auto; border-left: 1px solid #1e2329; padding-left: 12px; }
+  .row { display: flex; gap: 12px; font-size: 12px; padding: 2px 0; white-space: pre-wrap; }
+  .topic { color: var(--accent); min-width: 200px; }
+  .topic.reflex\.worm\.throttle { color: var(--warn); }
+  .topic.safety\.denied { color: var(--crit); }
+  .topic.thermal\.rising { color: var(--crit); }
+  .ts { color: var(--dim); min-width: 72px; }
+  #panel { border: 1px solid #1e2329; border-radius: 8px; padding: 12px; }
+  .stat { display: flex; justify-content: space-between; padding: 4px 0; font-size: 12px; }
+  .stat span:first-child { color: var(--dim); }
+</style>
+</head>
+<body>
+  <h1>CHIMERA <small>biologically-inspired homeostasis</small></h1>
+  <div id="board">
+    <div id="feed"></div>
+    <div id="panel">
+      <div class="stat"><span>thermal</span><span id="thermal">—</span></div>
+      <div class="stat"><span>slope (°C/min)</span><span id="slope">—</span></div>
+      <div class="stat"><span>samples</span><span id="samples">—</span></div>
+      <div class="stat"><span>events received</span><span id="count">0</span></div>
+    </div>
+  </div>
+<script>
+  const feed = document.getElementById("feed");
+  const countEl = document.getElementById("count");
+  let count = 0;
+  const src = new EventSource("/events");
+  src.onmessage = e => {
+    const d = JSON.parse(e.data);
+    const t = new Date().toLocaleTimeString();
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `<span class="ts">${t}</span>` +
+      `<span class="topic ${d.topic}">${d.topic}</span>` +
+      `<span>${JSON.stringify(d.payload)}</span>`;
+    feed.prepend(row);
+    while (feed.childElementCount > 300) feed.removeChild(feed.lastChild);
+    countEl.textContent = ++count;
+  };
+  async function refresh() {
+    try {
+      const r = await fetch("/state"); const j = await r.json();
+      document.getElementById("thermal").textContent =
+        j.thermal.latest_c != null ? j.thermal.latest_c.toFixed(1) + " °C" : "n/a";
+      document.getElementById("slope").textContent = j.thermal.slope_c_per_min.toFixed(2);
+      document.getElementById("samples").textContent = j.thermal.samples;
+    } catch {}
+  }
+  refresh(); setInterval(refresh, 5000);
+</script>
+</body>
+</html>
