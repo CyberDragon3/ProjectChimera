@@ -100,11 +100,15 @@ class ThermalSensor:
 
     async def run(self) -> None:
         log.info("sensor.thermal.start", interval_ms=int(self._interval * 1000))
+        online_logged = False
         while True:
             try:
                 # WMI calls routinely take 50–500 ms; offload from the loop.
                 c = await asyncio.to_thread(self._backend.read_celsius)
                 if c is not None:
+                    if not online_logged:
+                        log.info("sensor.thermal.online", celsius=c)
+                        online_logged = True
                     self._buf.append(c)
                     self._bus.publish(
                         Event(topic="thermal.sample", payload={"celsius": c}, ts=time.monotonic())
