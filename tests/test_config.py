@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from chimera.config import Settings, load, load_default
+from chimera.config import NeuroCfg, Settings, load, load_default
 
 
 def test_load_default_config() -> None:
@@ -66,3 +66,39 @@ def test_load_default_toml_parses_new_keys(tmp_path: Path) -> None:
     assert s.thresholds.thermal_critical_c == 92.5
     assert s.lysosome.enabled is False
     assert s.lysosome.targets == ("chrome_crashpad_handler.exe",)
+
+
+def test_neuro_cfg_defaults() -> None:
+    s = Settings()
+    assert s.neuro.enabled is False
+    assert s.neuro.tick_hz == 50
+    assert s.neuro.mouse_population == 100
+
+
+def test_neuro_cfg_frozen() -> None:
+    s = Settings()
+    with pytest.raises(ValidationError):
+        s.neuro.enabled = True  # type: ignore[misc]
+
+
+def test_neuro_cfg_extra_forbidden() -> None:
+    with pytest.raises(ValidationError):
+        NeuroCfg(unknown_field=1)  # type: ignore[call-arg]
+
+
+def test_default_toml_loads_with_neuro_section() -> None:
+    s = load_default()
+    assert isinstance(s, Settings)
+    assert s.neuro.enabled is False
+
+
+def test_toml_neuro_override(tmp_path: Path) -> None:
+    toml = tmp_path / "c.toml"
+    toml.write_text(
+        "[neuro]\n"
+        "enabled = true\n"
+        "mouse_population = 50\n"
+    )
+    s = load(toml)
+    assert s.neuro.enabled is True
+    assert s.neuro.mouse_population == 50

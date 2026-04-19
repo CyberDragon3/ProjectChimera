@@ -12,11 +12,12 @@ import structlog
 
 from chimera.bus import Bus, Event
 from chimera.config import Settings
-from chimera.reflexes.fly import FlyReflex
+from chimera.neuro.dopamine import DopamineModulator
+from chimera.reflexes.fly import FlyNeuroReflex, FlyReflex
 from chimera.reflexes.lysosome import LysosomeReflex, make_default_lysosome_backend
-from chimera.reflexes.mouse import MouseReflex
+from chimera.reflexes.mouse import MouseCortex, MouseReflex
 from chimera.reflexes.worm import PsutilThrottler, WormReflex
-from chimera.reflexes.zebrafish import ZebrafishReflex
+from chimera.reflexes.zebrafish import ZebrafishNeuroReflex, ZebrafishReflex
 from chimera.safety import ProtectedSpecies
 from chimera.sensors.cpu import CpuSensor, PsutilCpuBackend
 from chimera.sensors.idle import IdleSensor, make_default_idle_backend
@@ -151,18 +152,32 @@ class Chimera:
             PsutilThrottler(),
             deadline_ms=s.thresholds.reflex_deadline_ms,
         )
-        fly = FlyReflex(self.bus)
-        zebrafish = ZebrafishReflex(
-            self.bus,
-            self.thermal_buf,
-            slope_c_per_min_threshold=s.thresholds.thermal_slope_c_per_min,
-            critical_c=s.thresholds.thermal_critical_c,
-            critical_clear_c=s.thresholds.thermal_critical_clear_c,
-            critical_samples=s.thresholds.thermal_critical_samples,
-            max_hold_seconds=s.thresholds.thermal_critical_max_hold_seconds,
-            interval_ms=s.poll.thermal_interval_ms,
-        )
-        mouse = MouseReflex(self.bus)
+        if s.neuro.enabled:
+            fly = FlyNeuroReflex(self.bus, neuro_cfg=s.neuro)
+            zebrafish = ZebrafishNeuroReflex(
+                self.bus,
+                self.thermal_buf,
+                neuro_cfg=s.neuro,
+                slope_c_per_min_threshold=s.thresholds.thermal_slope_c_per_min,
+                critical_c=s.thresholds.thermal_critical_c,
+                critical_clear_c=s.thresholds.thermal_critical_clear_c,
+                critical_samples=s.thresholds.thermal_critical_samples,
+                max_hold_seconds=s.thresholds.thermal_critical_max_hold_seconds,
+            )
+            mouse = MouseCortex(self.bus, neuro_cfg=s.neuro)
+        else:
+            fly = FlyReflex(self.bus)  # type: ignore[assignment]
+            zebrafish = ZebrafishReflex(  # type: ignore[assignment]
+                self.bus,
+                self.thermal_buf,
+                slope_c_per_min_threshold=s.thresholds.thermal_slope_c_per_min,
+                critical_c=s.thresholds.thermal_critical_c,
+                critical_clear_c=s.thresholds.thermal_critical_clear_c,
+                critical_samples=s.thresholds.thermal_critical_samples,
+                max_hold_seconds=s.thresholds.thermal_critical_max_hold_seconds,
+                interval_ms=s.poll.thermal_interval_ms,
+            )
+            mouse = MouseReflex(self.bus)  # type: ignore[assignment]
         lysosome = LysosomeReflex(
             self.bus,
             self.safety,
@@ -183,7 +198,11 @@ class Chimera:
             ("reflex.mouse", mouse),
             ("reflex.lysosome", lysosome),
         ]:
-            self.spawn(name, obj.run)
+            self.spawn(name, obj.run)  # type: ignore[attr-defined]
+
+        if s.neuro.enabled:
+            dopamine = DopamineModulator(self.bus)
+            self.spawn("reflex.neuro.dopamine", lambda: dopamine.run(self._stop))
 
     def _start_dashboard(self) -> None:
         s = self.settings

@@ -4,7 +4,6 @@
 [protected_species]
 # Processes that Chimera can NEVER terminate or forcibly de-prioritize.
 # Loaded once at boot into an immutable frozenset.
-[protected_species]
 processes = [
     # --- Core Kernel & System Organs ---
     "System", "Registry", "smss.exe", "csrss.exe", "wininit.exe", 
@@ -70,3 +69,25 @@ format = "json"                    # "json" | "console"
 enabled = true
 sweep_interval_seconds = 600   # don't re-sweep within 10 min
 targets = []                    # opt-in exe names for phase-3 kill
+
+[neuro]
+# GLIF spiking-neuron layer (Evolution: Brainstem→Cortex with dopamine reward).
+# Set enabled = true to switch Zebrafish/Fly/Mouse to neural models.
+enabled = false
+# tick_hz = 50
+# tau_m_ms = 20.0
+# v_rest_mv = -65.0
+# v_reset_mv = -70.0
+# v_thresh_mv = -50.0
+# refractory_ms = 2.0
+# noise_sigma_mv = 1.5
+# zebrafish_input_gain = 8.0          # mV per (°C/s)
+# fly_input_gain = 0.05               # mV per idle-second
+# mouse_population = 100
+# mouse_excitatory_frac = 0.8
+# connectivity_p = 0.1
+# mouse_rate_threshold_hz = 25.0
+# mouse_creator_drive_mv = 12.0
+# dopamine_decay_per_sec = 0.1
+# dopamine_hit_window_s = 5.0
+# dopamine_gain_coeff = 0.5

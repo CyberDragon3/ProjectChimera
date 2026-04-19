@@ -71,6 +71,27 @@ class LysosomeCfg(_Frozen):
     targets: tuple[str, ...] = ()
 
 
+class NeuroCfg(_Frozen):
+    enabled: bool = False                  # fallback switch — legacy reflex used when False
+    tick_hz: int = 50
+    tau_m_ms: float = 20.0
+    v_rest_mv: float = -65.0
+    v_reset_mv: float = -70.0
+    v_thresh_mv: float = -50.0
+    refractory_ms: float = 2.0
+    noise_sigma_mv: float = 1.5
+    zebrafish_input_gain: float = 8.0      # mV per (°C/s)
+    fly_input_gain: float = 0.05           # mV per idle-second
+    mouse_population: int = 100
+    mouse_excitatory_frac: float = 0.8
+    connectivity_p: float = 0.1
+    mouse_rate_threshold_hz: float = 25.0
+    mouse_creator_drive_mv: float = 12.0
+    dopamine_decay_per_sec: float = 0.1
+    dopamine_hit_window_s: float = 5.0
+    dopamine_gain_coeff: float = 0.5
+
+
 class Settings(_Frozen):
     protected_species: ProtectedSpeciesCfg = Field(default_factory=ProtectedSpeciesCfg)
     thresholds: Thresholds = Field(default_factory=Thresholds)
@@ -80,6 +101,7 @@ class Settings(_Frozen):
     dashboard: Dashboard = Field(default_factory=Dashboard)
     logging: Logging = Field(default_factory=Logging)
     lysosome: LysosomeCfg = Field(default_factory=LysosomeCfg)
+    neuro: NeuroCfg = Field(default_factory=NeuroCfg)
 
 
 def load(path: Path) -> Settings:
