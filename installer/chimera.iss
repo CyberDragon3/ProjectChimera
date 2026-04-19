@@ -49,18 +49,27 @@ Filename: "{app}\{#AppExeName}"; Parameters: "--tray"; Description: "Launch Chim
 Type: filesandordirs; Name: "{app}"
 
 ; Register / deregister the Task Scheduler entry that launches at logon.
+; We invoke schtasks.exe directly (not via cmd /C) to dodge the cmd-quoting
+; minefield around an executable path that may contain spaces.
 [Code]
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  Cmd: string;
+  Params: string;
   ResultCode: Integer;
 begin
   if CurStep = ssPostInstall then
   begin
     if IsTaskSelected('logonstartup') then
     begin
-      Cmd := ExpandConstant('/C schtasks /Create /F /SC ONLOGON /RL LIMITED /TN "Chimera" /TR "\"' + ExpandConstant('{app}\{#AppExeName}') + '\" --tray"');
-      Exec('cmd.exe', Cmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      Params := '/Create /F /SC ONLOGON /RL LIMITED /TN "Chimera" /TR "\"' +
+                ExpandConstant('{app}\{#AppExeName}') + '\" --tray"';
+      if not Exec(ExpandConstant('{sys}\schtasks.exe'), Params, '',
+                  SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
+      begin
+        MsgBox('Could not register Chimera as a logon task (schtasks code ' +
+               IntToStr(ResultCode) + '). You can run scripts\install_task.ps1 manually.',
+               mbInformation, MB_OK);
+      end;
     end;
   end;
 end;
@@ -71,6 +80,7 @@ var
 begin
   if CurUninstallStep = usPostUninstall then
   begin
-    Exec('cmd.exe', '/C schtasks /Delete /F /TN "Chimera"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sys}\schtasks.exe'), '/Delete /F /TN "Chimera"', '',
+         SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
 end;

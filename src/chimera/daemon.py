@@ -47,6 +47,10 @@ class Chimera:
                 raise
             except Exception:
                 log.exception("task.error", task=name)
+                # A supervised task crashing is treated as fatal — set the stop
+                # event so the daemon shuts down cleanly instead of silently
+                # losing a sensor or reflex with no auto-restart.
+                self._stop.set()
                 raise
 
         self._tasks.append(asyncio.create_task(_runner(), name=name))
@@ -74,6 +78,11 @@ class Chimera:
 
     async def run(self, dry_run: bool = False) -> None:
         loop = asyncio.get_running_loop()
+
+        def _request_stop() -> None:
+            # Always hop back to the loop thread before touching the event.
+            loop.call_soon_threadsafe(self._stop.set)
+
         for sig_name in ("SIGINT", "SIGTERM"):
             sig = getattr(signal, sig_name, None)
             if sig is None:
@@ -81,8 +90,9 @@ class Chimera:
             try:
                 loop.add_signal_handler(sig, self._stop.set)
             except NotImplementedError:
-                # Windows lacks add_signal_handler for some signals.
-                signal.signal(sig, lambda *_: self._stop.set())
+                # Windows lacks add_signal_handler for some signals; the C
+                # signal handler runs on the main thread but outside the loop.
+                signal.signal(sig, lambda *_: _request_stop())
 
         log.info("chimera.start", dry_run=dry_run, protected=len(self.safety.members))
 

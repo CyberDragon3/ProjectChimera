@@ -34,8 +34,8 @@ class Win32WindowBackend:
         title = self._gui.GetWindowText(hwnd) or ""
         try:
             _, pid = self._proc.GetWindowThreadProcessId(hwnd)
-            exe = psutil.Process(pid).name() if pid else ""
-        except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+            exe = psutil.Process(pid).name() if pid and pid > 0 else ""
+        except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError, OSError):
             exe = ""
         return (exe, title)
 
@@ -66,15 +66,21 @@ class WindowSensor:
     async def run(self) -> None:
         log.info("sensor.window.start", interval_ms=int(self._interval * 1000))
         while True:
-            current = self._backend.foreground()
-            if current != self._last and current[0]:
-                self._last = current
-                exe, title = current
-                self._bus.publish(
-                    Event(
-                        topic="window.foreground",
-                        payload={"exe": exe, "title": title},
-                        ts=time.monotonic(),
+            try:
+                # psutil.Process(pid).name() can hit disk/registry; offload.
+                current = await asyncio.to_thread(self._backend.foreground)
+                if current != self._last and current[0]:
+                    self._last = current
+                    exe, title = current
+                    self._bus.publish(
+                        Event(
+                            topic="window.foreground",
+                            payload={"exe": exe, "title": title},
+                            ts=time.monotonic(),
+                        )
                     )
-                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                log.warning("sensor.window.iteration_failed", error=str(e))
             await asyncio.sleep(self._interval)

@@ -62,9 +62,18 @@ def create_app(bus: Bus, thermal_buf: RingBuffer, history_size: int = 200) -> Fa
             q = bus.subscribe("")
             try:
                 while True:
-                    ev = await q.get()
+                    try:
+                        # Periodic keepalive so dropped connections surface fast
+                        # via CancelledError instead of silently wedging the queue.
+                        ev = await asyncio.wait_for(q.get(), timeout=15.0)
+                    except asyncio.TimeoutError:
+                        yield b": keepalive\n\n"
+                        continue
                     data = json.dumps({"topic": ev.topic, "payload": ev.payload, "ts": ev.ts})
                     yield f"data: {data}\n\n".encode()
+            except asyncio.CancelledError:
+                log.info("dashboard.sse.client_disconnected")
+                raise
             finally:
                 bus.unsubscribe("", q)
 

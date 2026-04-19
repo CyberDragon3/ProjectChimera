@@ -40,7 +40,17 @@ class LhmThermalBackend:
             return None
         if not sensors:
             return None
-        values = [float(s.Value) for s in sensors if s.Value is not None]
+        # WMI may return non-numeric strings (e.g. "N/A"); coerce defensively
+        # so a single bad sensor cannot kill the polling task.
+        values: list[float] = []
+        for s in sensors:
+            v = getattr(s, "Value", None)
+            if v is None:
+                continue
+            try:
+                values.append(float(v))
+            except (TypeError, ValueError):
+                continue
         if not values:
             return None
         # Report the hottest reading — most actionable signal.
@@ -79,10 +89,16 @@ class ThermalSensor:
     async def run(self) -> None:
         log.info("sensor.thermal.start", interval_ms=int(self._interval * 1000))
         while True:
-            c = self._backend.read_celsius()
-            if c is not None:
-                self._buf.append(c)
-                self._bus.publish(
-                    Event(topic="thermal.sample", payload={"celsius": c}, ts=time.monotonic())
-                )
+            try:
+                # WMI calls routinely take 50–500 ms; offload from the loop.
+                c = await asyncio.to_thread(self._backend.read_celsius)
+                if c is not None:
+                    self._buf.append(c)
+                    self._bus.publish(
+                        Event(topic="thermal.sample", payload={"celsius": c}, ts=time.monotonic())
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                log.warning("sensor.thermal.iteration_failed", error=str(e))
             await asyncio.sleep(self._interval)

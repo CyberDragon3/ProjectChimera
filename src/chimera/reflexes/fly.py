@@ -6,6 +6,7 @@ Pure event re-shaping; no OS calls, no safety gate needed.
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 import structlog
@@ -25,15 +26,20 @@ class FlyReflex:
         try:
             while True:
                 event = await q.get()
-                if event.topic == "idle.enter":
-                    out = "arousal.away"
-                elif event.topic == "idle.exit":
-                    out = "arousal.present"
-                else:
-                    continue
-                self._bus.publish(
-                    Event(topic=out, payload=dict(event.payload), ts=time.monotonic())
-                )
-                log.info("reflex.fly.arousal", state=out.rsplit(".", 1)[-1])
+                try:
+                    if event.topic == "idle.enter":
+                        out = "arousal.away"
+                    elif event.topic == "idle.exit":
+                        out = "arousal.present"
+                    else:
+                        continue
+                    self._bus.publish(
+                        Event(topic=out, payload=dict(event.payload), ts=time.monotonic())
+                    )
+                    log.info("reflex.fly.arousal", state=out.rsplit(".", 1)[-1])
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    log.exception("reflex.fly.handler_failed", error=str(e))
         finally:
             self._bus.unsubscribe("idle", q)

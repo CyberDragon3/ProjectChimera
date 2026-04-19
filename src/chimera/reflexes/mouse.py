@@ -7,6 +7,7 @@ Acts as the gatekeeper that lets the Worm skip friendly-fire throttling.
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 import structlog
@@ -50,22 +51,27 @@ class MouseReflex:
         try:
             while True:
                 event = await q.get()
-                exe = str(event.payload.get("exe", "")).lower()
-                intentional = exe in self._creators
-                self._bus.publish(
-                    Event(
-                        topic="context.active_window",
-                        payload={
-                            **event.payload,
-                            "intentional": intentional,
-                        },
-                        ts=time.monotonic(),
+                try:
+                    exe = str(event.payload.get("exe", "")).lower()
+                    intentional = exe in self._creators
+                    self._bus.publish(
+                        Event(
+                            topic="context.active_window",
+                            payload={
+                                **event.payload,
+                                "intentional": intentional,
+                            },
+                            ts=time.monotonic(),
+                        )
                     )
-                )
-                log.info(
-                    "reflex.mouse.classified",
-                    exe=exe,
-                    intentional=intentional,
-                )
+                    log.info(
+                        "reflex.mouse.classified",
+                        exe=exe,
+                        intentional=intentional,
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    log.exception("reflex.mouse.handler_failed", error=str(e))
         finally:
             self._bus.unsubscribe("window.foreground", q)

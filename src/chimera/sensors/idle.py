@@ -75,23 +75,30 @@ class IdleSensor:
     async def run(self) -> None:
         log.info("sensor.idle.start", threshold_s=self._threshold)
         while True:
-            seconds = self._backend.idle_seconds()
-            if seconds >= self._threshold and not self._is_idle:
-                self._is_idle = True
-                self._bus.publish(
-                    Event(
-                        topic="idle.enter",
-                        payload={"seconds": seconds},
-                        ts=time.monotonic(),
+            try:
+                # ctypes/Win32 calls are constant-time but technically blocking;
+                # offload to keep the invariant uniform across sensors.
+                seconds = await asyncio.to_thread(self._backend.idle_seconds)
+                if seconds >= self._threshold and not self._is_idle:
+                    self._is_idle = True
+                    self._bus.publish(
+                        Event(
+                            topic="idle.enter",
+                            payload={"seconds": seconds},
+                            ts=time.monotonic(),
+                        )
                     )
-                )
-            elif seconds < self._threshold and self._is_idle:
-                self._is_idle = False
-                self._bus.publish(
-                    Event(
-                        topic="idle.exit",
-                        payload={"seconds": seconds},
-                        ts=time.monotonic(),
+                elif seconds < self._threshold and self._is_idle:
+                    self._is_idle = False
+                    self._bus.publish(
+                        Event(
+                            topic="idle.exit",
+                            payload={"seconds": seconds},
+                            ts=time.monotonic(),
+                        )
                     )
-                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                log.warning("sensor.idle.iteration_failed", error=str(e))
             await asyncio.sleep(self._interval)

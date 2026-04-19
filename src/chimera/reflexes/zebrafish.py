@@ -40,23 +40,28 @@ class ZebrafishReflex:
             window_s=self._window,
         )
         while True:
-            slope = self._buf.slope(self._window)
-            if slope >= self._threshold_per_sec:
-                severity = "critical" if slope >= 2 * self._threshold_per_sec else "warn"
-                self._bus.publish(
-                    Event(
-                        topic="thermal.rising",
-                        payload={
-                            "slope_c_per_min": slope * 60,
-                            "severity": severity,
-                            "window_s": self._window,
-                        },
-                        ts=time.monotonic(),
+            try:
+                slope = self._buf.slope(self._window)
+                if slope >= self._threshold_per_sec:
+                    severity = "critical" if slope >= 2 * self._threshold_per_sec else "warn"
+                    self._bus.publish(
+                        Event(
+                            topic="thermal.rising",
+                            payload={
+                                "slope_c_per_min": slope * 60,
+                                "severity": severity,
+                                "window_s": self._window,
+                            },
+                            ts=time.monotonic(),
+                        )
                     )
-                )
-                log.info(
-                    "reflex.zebrafish.rising",
-                    slope_c_per_min=slope * 60,
-                    severity=severity,
-                )
+                    log.info(
+                        "reflex.zebrafish.rising",
+                        slope_c_per_min=slope * 60,
+                        severity=severity,
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                log.exception("reflex.zebrafish.iteration_failed", error=str(e))
             await asyncio.sleep(self._interval)

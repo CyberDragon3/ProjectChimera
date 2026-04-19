@@ -32,7 +32,15 @@ def run_tray(settings: Settings) -> None:
 
     def _run_loop() -> None:
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(chimera.run(dry_run=False))
+        try:
+            loop.run_until_complete(chimera.run(dry_run=False))
+        except Exception:
+            log.exception("tray.daemon_crashed")
+        finally:
+            try:
+                loop.close()
+            except Exception:
+                log.exception("tray.loop_close_failed")
 
     t = threading.Thread(target=_run_loop, daemon=True, name="chimera-loop")
     t.start()
@@ -42,7 +50,12 @@ def run_tray(settings: Settings) -> None:
         webbrowser.open(url)
 
     def _quit(icon, _item) -> None:
-        loop.call_soon_threadsafe(chimera._stop.set)
+        # The daemon may be inside uvicorn shutdown / sensor cancellation;
+        # set the stop event then let the icon close after submitting it.
+        try:
+            loop.call_soon_threadsafe(chimera._stop.set)
+        except RuntimeError:
+            pass  # loop already closed
         icon.stop()
 
     menu = pystray.Menu(
@@ -51,4 +64,6 @@ def run_tray(settings: Settings) -> None:
     )
     icon = pystray.Icon("chimera", _build_icon_image(), "Chimera", menu)
     icon.run()
-    t.join(timeout=3.0)
+    # Allow uvicorn + sensors a generous shutdown budget. Daemon thread
+    # gets kill-on-process-exit if we exceed.
+    t.join(timeout=15.0)

@@ -55,5 +55,12 @@ class RingBuffer:
             return 0.0
         ts = np.fromiter((s.t for s in samples), dtype=np.float64, count=len(samples))
         vs = np.fromiter((s.v for s in samples), dtype=np.float64, count=len(samples))
-        slope, _ = np.polyfit(ts, vs, 1)
+        # polyfit on a singular matrix (all timestamps identical) raises
+        # LinAlgError. With monotonic-clock samples this is rare but possible.
+        if float(np.ptp(ts)) == 0.0:
+            return 0.0
+        try:
+            slope, _ = np.polyfit(ts, vs, 1)
+        except np.linalg.LinAlgError:
+            return 0.0
         return float(slope)

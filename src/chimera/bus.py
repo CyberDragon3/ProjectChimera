@@ -47,19 +47,27 @@ class Bus:
             subs.discard(queue)
 
     def publish(self, event: Event) -> None:
-        """Non-blocking publish. Drops on overflow (telemetry over correctness)."""
-        for prefix, queues in self._subs.items():
+        """Non-blocking publish. Drops oldest on overflow (telemetry over correctness)."""
+        # Snapshot to defend against concurrent subscribe/unsubscribe mutation.
+        for prefix, queues in tuple(self._subs.items()):
             matched = (
                 prefix == ""
                 or event.topic == prefix
                 or event.topic.startswith(prefix + ".")
             )
-            if matched:
-                for q in queues:
+            if not matched:
+                continue
+            for q in tuple(queues):
+                try:
+                    q.put_nowait(event)
+                except asyncio.QueueFull:
+                    self._dropped += 1
+                    # True drop-oldest: evict head and retry once.
                     try:
+                        q.get_nowait()
                         q.put_nowait(event)
-                    except asyncio.QueueFull:
-                        self._dropped += 1
+                    except (asyncio.QueueEmpty, asyncio.QueueFull):
+                        pass
 
     async def stream(self, topic_prefix: str) -> AsyncIterator[Event]:
         """Async iterator over a subscription. Unsubscribes on cancel."""
