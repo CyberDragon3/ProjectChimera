@@ -13,6 +13,7 @@ import structlog
 from chimera.bus import Bus, Event
 from chimera.config import Settings
 from chimera.reflexes.fly import FlyReflex
+from chimera.reflexes.lysosome import LysosomeReflex, make_default_lysosome_backend
 from chimera.reflexes.mouse import MouseReflex
 from chimera.reflexes.worm import PsutilThrottler, WormReflex
 from chimera.reflexes.zebrafish import ZebrafishReflex
@@ -162,6 +163,14 @@ class Chimera:
             interval_ms=s.poll.thermal_interval_ms,
         )
         mouse = MouseReflex(self.bus)
+        lysosome = LysosomeReflex(
+            self.bus,
+            self.safety,
+            make_default_lysosome_backend(),
+            enabled=s.lysosome.enabled,
+            sweep_interval_seconds=s.lysosome.sweep_interval_seconds,
+            targets=s.lysosome.targets,
+        )
 
         for name, obj in [
             ("sensor.cpu", cpu_sensor),
@@ -172,6 +181,7 @@ class Chimera:
             ("reflex.fly", fly),
             ("reflex.zebrafish", zebrafish),
             ("reflex.mouse", mouse),
+            ("reflex.lysosome", lysosome),
         ]:
             self.spawn(name, obj.run)
 
