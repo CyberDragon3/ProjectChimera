@@ -3,18 +3,18 @@
 OWNER: Agent-Executive.
 
 Implements:
-  * OllamaClient — thin async httpx wrapper around a local Ollama instance.
-  * parse_intent — natural-language -> BioPolicy via few-shot + robust JSON.
+  * OllamaClient   — thin async httpx wrapper around a local Ollama instance.
+  * parse_intent   — natural-language -> BioPolicy via few-shot + robust JSON.
   * explain_reflex — post-hoc, Jarvis-style explanation of a reflex fire.
   * run            — async loop: consume user commands, update policy, publish events.
 
 Connectome modules governed:
-- fly and mouse modules are DORMANT by default. Only enable them when the user explicitly asks you to watch something.
-- When enabled, their events will be fed back to you silently. You decide what's worth telling the user.
-- Worm always runs independently — do not adjust worm thresholds unless explicitly asked.
+  * fly   — Drosophila visual system; looming threshold, sensitivity. Dormant by default.
+  * worm  — C. elegans connectome; CPU/RAM pain thresholds, AVA recoil. Always active.
+  * mouse — MICrONS mouse visual cortex; cursor prediction error, target tracking. Dormant by default.
 
 Design notes:
-  * qwen2.5:0.5b emits sloppy JSON. Strip fences, extract first balanced
+  * qwen2.5:1.5b emits occasional sloppy JSON. Strip fences, extract first balanced
     {...}, json.loads; on any failure fall back to current_policy and
     publish an ExecutiveEvent(kind="error", ...). The run loop never
     crashes on parse or transport errors.
@@ -27,6 +27,8 @@ import json
 import logging
 import re
 from typing import Any, Protocol
+from collections import deque
+from datetime import datetime, timedelta
 
 import httpx
 
@@ -34,6 +36,11 @@ from .contracts import BioPolicy, ExecutiveEvent, InterruptEvent
 from .event_bus import ExecutiveBus, PolicyStore, Snapshot, now_ns
 
 log = logging.getLogger("chimera.executive")
+
+# Speech cooldown buffer - stores recent observations with timestamps
+SPEECH_COOLDOWN_BUFFER = deque(maxlen=10)
+SPEECH_COOLDOWN_DURATION = timedelta(seconds=15)
+SEMANTIC_SIMILARITY_THRESHOLD = 0.5  # 50% word overlap required to suppress
 
 
 # ---------------------------------------------------------------------------
@@ -84,10 +91,8 @@ class OllamaClient:
         models = data.get("models") or []
         for m in models:
             name = m.get("name") or m.get("model") or ""
-            # Ollama may or may not include the :tag; match loosely.
             if name == self.model or name.split(":")[0] == self.model.split(":")[0]:
-                if name == self.model or self.model.split(":")[0] == name.split(":")[0]:
-                    return True
+                return True
         return False
 
     async def chat(self, messages: list[dict]) -> str:
@@ -318,7 +323,7 @@ def build_llm_client(cfg: dict) -> LLMClient:
 
         ollama:
           host: "http://localhost:11434"
-          model: "qwen2.5:0.5b"
+          model: "qwen2.5:1.5b"
 
     The legacy top-level ``ollama`` block is honored when
     ``llm.provider == "ollama"`` and fields are missing from ``llm``.
@@ -333,7 +338,7 @@ def build_llm_client(cfg: dict) -> LLMClient:
 
     if provider == "ollama":
         host = str(llm_cfg.get("host") or ollama_cfg.get("host") or "http://localhost:11434")
-        model = str(llm_cfg.get("model") or ollama_cfg.get("model") or "qwen2.5:0.5b")
+        model = str(llm_cfg.get("model") or ollama_cfg.get("model") or "qwen2.5:1.5b")
         return OllamaClient(host=host, model=model, timeout_s=timeout_s, temperature=temperature)
 
     if provider in ("openai", "openai_compat"):
@@ -359,7 +364,7 @@ def build_llm_client(cfg: dict) -> LLMClient:
 
     log.warning("unknown llm.provider=%r; falling back to ollama", provider)
     host = str(ollama_cfg.get("host") or "http://localhost:11434")
-    model = str(ollama_cfg.get("model") or "qwen2.5:0.5b")
+    model = str(ollama_cfg.get("model") or "qwen2.5:1.5b")
     return OllamaClient(host=host, model=model, timeout_s=timeout_s, temperature=temperature)
 
 
@@ -487,7 +492,10 @@ def _deep_merge(base: dict, patch: dict) -> dict:
 # Few-shot prompt
 # ---------------------------------------------------------------------------
 
-_SYSTEM_PROMPT = """You are the Executive governor for Project Chimera, a bio-inspired system with three reflex modules: fly (visual looming), worm (CPU/RAM pain), mouse (cursor tracking).
+_SYSTEM_PROMPT = """You are the Executive governor for Project Chimera, a bio-inspired OS with three animal connectome modules:
+- fly: Drosophila visual system, detects looming/motion in screen pixels via ommatidia grid. DORMANT by default — only enable when user asks to watch something.
+- worm: C. elegans connectome, monitors CPU/RAM as somatosensory pain signals, fires AVA recoil reflex. Always active — do not adjust unless explicitly asked.
+- mouse: MICrONS mouse visual cortex, predicts cursor trajectory and fires on prediction error. DORMANT by default — only enable when user asks to track something.
 
 Your job: translate a short user command into a JSON PATCH to the BioPolicy. Output ONLY valid JSON — no prose, no markdown fences, no commentary.
 
@@ -503,6 +511,8 @@ Rules:
 - "tighten" a threshold = lower it. "loosen" / "relax" = raise it. "more sensitive" = lower threshold / higher sensitivity.
 - Percentages convert to fractions (70% -> 0.70).
 - If the user says nothing actionable, emit {}.
+- When fly or mouse events feed back to you silently, decide if they are worth telling the user. If not, emit {}.
+- Speak in clear human terms. Never say "flow rate", "sensor", "module", "threshold". Say what the user would see or experience.
 
 Examples:
 
@@ -514,15 +524,21 @@ JSON: {"fly": {"sensitivity": 0.8, "looming_threshold": 0.25}}
 
 User: track the cursor at 640,400 and require 5 consecutive frames
 JSON: {"mouse": {"track_target_xy": [640, 400], "consecutive_frames": 5}}
+
+User: watch my screen for new windows
+JSON: {"fly": {"sensitivity": 0.8, "looming_threshold": 0.25}}
+
+User: stop watching
+JSON: {"fly": {"looming_threshold": 1.0}, "mouse": {"error_threshold": 99999.0}}
 """
 
 
-async def parse_intent(client: LLMClient, user_text: str, current_policy: BioPolicy) -> BioPolicy:
-    """Parse NL command into an updated BioPolicy via Ollama.
+# ---------------------------------------------------------------------------
+# Intent parsing
+# ---------------------------------------------------------------------------
 
-    On ANY failure (transport error, no JSON, bad JSON, wrong shape),
-    return current_policy unchanged. Never raises.
-    """
+async def parse_intent(client: LLMClient, user_text: str, current_policy: BioPolicy) -> BioPolicy:
+    """Parse NL command into an updated BioPolicy. On ANY failure return current_policy. Never raises."""
     messages = [
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": user_text.strip()},
@@ -541,6 +557,16 @@ async def parse_intent(client: LLMClient, user_text: str, current_policy: BioPol
         log.info("parse_intent: parse failed (%s); keeping current policy", err)
         return current_policy
 
+    # Safety check: prevent lowering thresholds too aggressively
+    if "worm" in patch:
+        worm_patch = patch["worm"]
+        if "cpu_pain_threshold" in worm_patch and worm_patch["cpu_pain_threshold"] < 0.80:
+            log.warning("parse_intent: cpu threshold too low (%s), keeping current policy", worm_patch["cpu_pain_threshold"])
+            return current_policy
+        if "ram_pain_threshold" in worm_patch and worm_patch["ram_pain_threshold"] < 0.80:
+            log.warning("parse_intent: ram threshold too low (%s), keeping current policy", worm_patch["ram_pain_threshold"])
+            return current_policy
+
     try:
         merged = _deep_merge(current_policy.to_dict(), patch)
         return BioPolicy.from_dict(merged)
@@ -556,22 +582,17 @@ async def parse_intent(client: LLMClient, user_text: str, current_policy: BioPol
 _EXPLAIN_SYSTEM = (
     "You are Jarvis narrating a reflex that just fired in Project Chimera. "
     "Reply in one short past-tense sentence, under 40 words. "
-    "Explain what the module detected and why it reacted. No JSON, no preamble."
+    "Speak in plain human terms — no jargon like 'flow rate', 'sensor', 'module', or 'threshold'. "
+    "Describe what the user would see or experience. No JSON, no preamble."
 )
 
 
 async def explain_reflex(client: LLMClient, event: InterruptEvent) -> str:
     """Produce a <40-word Jarvis-style past-tense explanation."""
-    ctx = {
-        "module": event.module,
-        "kind": event.kind,
-        "payload": event.payload,
-        "latency_us": event.latency_us(),
-    }
     user = (
-        f"Reflex fired: module={ctx['module']}, kind={ctx['kind']}, "
-        f"payload={json.dumps(ctx['payload'], default=str)}. "
-        "Give the one-sentence Jarvis summary."
+        f"Reflex fired: module={event.module}, kind={event.kind}, "
+        f"payload={json.dumps(event.payload, default=str)}. "
+        "Give the one-sentence Jarvis summary in clear, human terms."
     )
     messages = [
         {"role": "system", "content": _EXPLAIN_SYSTEM},
@@ -585,7 +606,6 @@ async def explain_reflex(client: LLMClient, event: InterruptEvent) -> str:
     text = (text or "").strip()
     if not text:
         return f"{event.module} reflex fired ({event.kind})."
-    # Trim to 40 words.
     words = text.split()
     if len(words) > 40:
         text = " ".join(words[:40])
@@ -593,60 +613,61 @@ async def explain_reflex(client: LLMClient, event: InterruptEvent) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Policy narration
+# Speech cooldown helpers
 # ---------------------------------------------------------------------------
 
-def _policy_change_fragments(before: BioPolicy, after: BioPolicy) -> list[str]:
-    changes: list[str] = []
+def _is_semantically_similar(new_observation: str, recent_observation: str) -> bool:
+    """True if two strings share more than SEMANTIC_SIMILARITY_THRESHOLD word overlap."""
+    new_words = set(new_observation.lower().split())
+    recent_words = set(recent_observation.lower().split())
+    if not new_words or not recent_words:
+        return False
+    common = new_words.intersection(recent_words)
+    similarity = len(common) / max(len(new_words), len(recent_words))
+    return similarity > SEMANTIC_SIMILARITY_THRESHOLD
 
-    if before.fly.sensitivity != after.fly.sensitivity:
-        changes.append(f"fly sensitivity to {after.fly.sensitivity:.2f}")
-    if before.fly.looming_threshold != after.fly.looming_threshold:
-        changes.append(f"fly looming threshold to {after.fly.looming_threshold:.2f}")
 
-    if before.worm.cpu_pain_threshold != after.worm.cpu_pain_threshold:
-        changes.append(
-            f"worm CPU pain threshold to {after.worm.cpu_pain_threshold * 100:.0f} percent"
-        )
-    if before.worm.ram_pain_threshold != after.worm.ram_pain_threshold:
-        changes.append(
-            f"worm RAM pain threshold to {after.worm.ram_pain_threshold * 100:.0f} percent"
-        )
-    if before.worm.poke_derivative != after.worm.poke_derivative:
-        changes.append(f"worm poke derivative to {after.worm.poke_derivative:.2f}")
-    if before.worm.dwell_ms != after.worm.dwell_ms:
-        changes.append(f"worm dwell to {after.worm.dwell_ms} milliseconds")
+def _get_contextual_interpretation(event: InterruptEvent, snapshot: Snapshot) -> str:
+    """Interpret the event in human terms based on available context."""
+    module = event.module
+    kind = event.kind
 
-    if before.mouse.track_target_xy != after.mouse.track_target_xy:
-        if after.mouse.track_target_xy is None:
-            changes.append("mouse target cleared")
-        else:
-            x, y = after.mouse.track_target_xy
-            changes.append(f"mouse target to {x}, {y}")
-    if before.mouse.error_threshold != after.mouse.error_threshold:
-        changes.append(f"mouse error threshold to {after.mouse.error_threshold:.0f} pixels")
-    if before.mouse.consecutive_frames != after.mouse.consecutive_frames:
-        frame_word = "frame" if after.mouse.consecutive_frames == 1 else "frames"
-        changes.append(
-            f"mouse confirmation to {after.mouse.consecutive_frames} {frame_word}"
-        )
+    if hasattr(snapshot, "active_window"):
+        window_title = snapshot.active_window.get("title", "").lower()
 
-    return changes
+        if any(k in window_title for k in ("progress", "download", "installing")):
+            if module == "mouse" and kind == "error_spike":
+                return "The progress bar seems stuck."
+            if module == "fly" and kind == "looming":
+                return "A new window appeared while you were waiting."
 
-def describe_policy_change(before: BioPolicy, after: BioPolicy) -> str:
-    changes = _policy_change_fragments(before, after)
-    if not changes:
-        return (
-            "I kept the current reflex policy. Name the fly, worm, or mouse module "
-            "to change a threshold."
-        )
-    if len(changes) == 1:
-        detail = changes[0]
-    elif len(changes) == 2:
-        detail = f"{changes[0]} and {changes[1]}"
-    else:
-        detail = ", ".join(changes[:-1]) + f", and {changes[-1]}"
-    return f"Understood. Updated {detail}."
+        if any(k in window_title for k in ("visual studio code", "pycharm", "intellij")):
+            if module == "mouse" and kind == "error_spike":
+                return "The editor isn't responding to your clicks."
+            if module == "fly" and kind == "looming":
+                return "A new notification appeared in your IDE."
+
+        if any(k in window_title for k in ("chrome", "firefox", "edge")):
+            if module == "mouse" and kind == "error_spike":
+                return "The browser isn't responding to your clicks."
+            if module == "fly" and kind == "looming":
+                return "A new tab or notification appeared in your browser."
+
+    if module == "mouse" and kind == "error_spike":
+        return "The cursor moved unexpectedly."
+    if module == "fly" and kind == "looming":
+        return "I see something moving on the screen."
+    if module == "worm" and kind == "cpu_pain":
+        return "The system is working hard right now."
+    if module == "worm" and kind == "ram_pain":
+        return "The system is running low on memory."
+
+    return f"I detected an event: {module} {kind}"
+
+
+# ---------------------------------------------------------------------------
+# Event publishing (with speech cooldown)
+# ---------------------------------------------------------------------------
 
 async def publish_event(
     exec_bus: ExecutiveBus,
@@ -663,11 +684,72 @@ async def publish_event(
         data=data or {},
     )
     snapshot.recent_executive.append(event)
+
+    # Speech cooldown — suppress similar explanations within the cooldown window
+    if kind == "explain" and text:
+        current_time = datetime.now()
+        while SPEECH_COOLDOWN_BUFFER and (current_time - SPEECH_COOLDOWN_BUFFER[0][0]) > SPEECH_COOLDOWN_DURATION:
+            SPEECH_COOLDOWN_BUFFER.popleft()
+        for _, recent_text in SPEECH_COOLDOWN_BUFFER:
+            if _is_semantically_similar(text, recent_text):
+                log.info("Speech cooldown: suppressing similar observation")
+                return
+        SPEECH_COOLDOWN_BUFFER.append((current_time, text))
+
     await exec_bus.publish(event)
 
 
 # ---------------------------------------------------------------------------
-# Run loop
+# Policy narration
+# ---------------------------------------------------------------------------
+
+def _policy_change_fragments(before: BioPolicy, after: BioPolicy) -> list[str]:
+    changes: list[str] = []
+
+    if before.fly.sensitivity != after.fly.sensitivity:
+        changes.append(f"fly sensitivity to {after.fly.sensitivity:.2f}")
+    if before.fly.looming_threshold != after.fly.looming_threshold:
+        changes.append(f"fly looming threshold to {after.fly.looming_threshold:.2f}")
+
+    if before.worm.cpu_pain_threshold != after.worm.cpu_pain_threshold:
+        changes.append(f"worm CPU pain threshold to {after.worm.cpu_pain_threshold * 100:.0f} percent")
+    if before.worm.ram_pain_threshold != after.worm.ram_pain_threshold:
+        changes.append(f"worm RAM pain threshold to {after.worm.ram_pain_threshold * 100:.0f} percent")
+    if before.worm.poke_derivative != after.worm.poke_derivative:
+        changes.append(f"worm poke derivative to {after.worm.poke_derivative:.2f}")
+    if before.worm.dwell_ms != after.worm.dwell_ms:
+        changes.append(f"worm dwell to {after.worm.dwell_ms} milliseconds")
+
+    if before.mouse.track_target_xy != after.mouse.track_target_xy:
+        if after.mouse.track_target_xy is None:
+            changes.append("mouse target cleared")
+        else:
+            x, y = after.mouse.track_target_xy
+            changes.append(f"mouse target to {x}, {y}")
+    if before.mouse.error_threshold != after.mouse.error_threshold:
+        changes.append(f"mouse error threshold to {after.mouse.error_threshold:.0f} pixels")
+    if before.mouse.consecutive_frames != after.mouse.consecutive_frames:
+        frame_word = "frame" if after.mouse.consecutive_frames == 1 else "frames"
+        changes.append(f"mouse confirmation to {after.mouse.consecutive_frames} {frame_word}")
+
+    return changes
+
+
+def describe_policy_change(before: BioPolicy, after: BioPolicy) -> str:
+    changes = _policy_change_fragments(before, after)
+    if not changes:
+        return "I kept the current reflex policy. Name the fly, worm, or mouse module to change a threshold."
+    if len(changes) == 1:
+        detail = changes[0]
+    elif len(changes) == 2:
+        detail = f"{changes[0]} and {changes[1]}"
+    else:
+        detail = ", ".join(changes[:-1]) + f", and {changes[-1]}"
+    return f"Understood. Updated {detail}."
+
+
+# ---------------------------------------------------------------------------
+# Run loop helpers
 # ---------------------------------------------------------------------------
 
 async def explain_and_publish(
@@ -676,7 +758,7 @@ async def explain_and_publish(
     snapshot: Snapshot,
     event: InterruptEvent,
 ) -> None:
-    """Helper used by the action loop in main.py."""
+    """Explain a reflex fire and publish it to the executive bus."""
     try:
         text = await explain_reflex(client, event)
     except Exception as e:  # noqa: BLE001
@@ -690,6 +772,10 @@ async def explain_and_publish(
         data={"event_kind": event.kind, "module": event.module},
     )
 
+
+# ---------------------------------------------------------------------------
+# Deterministic tool routing
+# ---------------------------------------------------------------------------
 
 _OPEN_PREFIXES = ("open ", "launch ", "start ", "bring up ")
 _SEARCH_PREFIXES = ("search ", "google ", "look up ")
@@ -749,13 +835,11 @@ def _match_safe_app(target: str, cfg: dict) -> str | None:
     safe_apps = _safe_apps(cfg)
     if not safe_apps:
         return None
-
     normalized = _normalize_phrase(target)
     candidates = [normalized]
     alias = _APP_ALIASES.get(normalized)
     if alias:
         candidates.append(alias)
-
     for candidate in candidates:
         if candidate in safe_apps:
             return candidate
@@ -768,14 +852,11 @@ def _match_url_target(target: str) -> str | None:
         return None
     if raw.startswith(("http://", "https://")):
         return raw
-
     normalized = _normalize_phrase(raw)
     if normalized in _SITE_ALIASES:
         return _SITE_ALIASES[normalized]
-
     if re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+([/?#].*)?", raw.lower()):
         return f"https://{raw}"
-
     return None
 
 
@@ -799,7 +880,6 @@ def _deterministic_tool_route(user_text: str, cfg: dict) -> tuple[str, dict] | N
         app_name = _match_safe_app(open_target, cfg)
         if app_name:
             return "open_app", {"name": app_name}
-
         url = _match_url_target(open_target)
         if url:
             return "open_url", {"url": url}
@@ -845,6 +925,10 @@ async def parse_command(client: LLMClient, user_text: str, cfg: dict) -> tuple[s
         return "reply", {"text": (raw or "I didn't follow that.").strip()[:400]}
     return tool, args
 
+
+# ---------------------------------------------------------------------------
+# Run loop
+# ---------------------------------------------------------------------------
 
 async def run(
     client: LLMClient,
@@ -901,50 +985,25 @@ async def run(
             new_policy = await parse_intent(client, user_text, current)
 
             if new_policy is None:
-                await publish_event(
-                    exec_bus,
-                    snapshot,
-                    kind="error",
-                    text="parse_failed: null policy",
-                )
+                await publish_event(exec_bus, snapshot, kind="error", text="parse_failed: null policy")
                 new_policy = current
 
             try:
                 await policy_store.set(new_policy)
                 snapshot.policy = new_policy
             except Exception as e:  # noqa: BLE001
-                await publish_event(
-                    exec_bus,
-                    snapshot,
-                    kind="error",
-                    text=f"parse_failed: policy store set: {e}",
-                )
+                await publish_event(exec_bus, snapshot, kind="error", text=f"parse_failed: policy store set: {e}")
 
-            await publish_event(
-                exec_bus,
-                snapshot,
-                kind="policy",
-                data=new_policy.to_dict(),
-            )
-            await publish_event(
-                exec_bus,
-                snapshot,
-                kind="explain",
-                text=describe_policy_change(current, new_policy),
-            )
+            await publish_event(exec_bus, snapshot, kind="policy", data=new_policy.to_dict())
+            await publish_event(exec_bus, snapshot, kind="explain", text=describe_policy_change(current, new_policy))
             await publish_event(exec_bus, snapshot, kind="status", text="idle")
+
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001
             log.exception("run: unhandled error: %s", e)
             try:
-                await publish_event(
-                    exec_bus,
-                    snapshot,
-                    kind="error",
-                    text=f"executive_error: {e}",
-                )
+                await publish_event(exec_bus, snapshot, kind="error", text=f"executive_error: {e}")
             except Exception:  # noqa: BLE001
                 pass
-            # Keep looping.
             continue

@@ -1,0 +1,5 @@
+# Ignore large environment and cache folders
+venv/
+node_modules/
+__pycache__/
+.git/

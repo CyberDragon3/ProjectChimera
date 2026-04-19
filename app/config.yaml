@@ -6,7 +6,7 @@
 # For openai_compat, base_url points at the target (Groq, Together, Azure, llama.cpp, vLLM…).
 llm:
   provider: "ollama"
-  model: "qwen2.5:0.5b"
+  model: "qwen2.5:1.5b"
   host: "http://localhost:11434"     # ollama only
   base_url: null                      # openai / openai_compat only
   api_key: ""                        # openai / anthropic / openai_compat only
@@ -40,24 +40,21 @@ translation:
 
 # Default policy — can be overridden live by the Executive.
 policy:
-  # Default policy — can be overridden live by the Executive.
-policy:
   fly:
-    sensitivity: 0.0          # dormant
-    looming_threshold: 1.0    # unreachable threshold
+    sensitivity: 0.5
+    looming_threshold: 1.0      # dormant
   worm:
-    cpu_pain_threshold: 0.60   # 60% — Just above Defender's 50% default throttle limit
-    ram_pain_threshold: 0.85   # 85% — High enough to ignore browser caching, low enough to stop OOM crashes
-    poke_derivative: 1.50      # 1.5/s — Makes the worm ignore normal app-launch spikes
-    dwell_ms: 3000             # 3000ms — Forces the worm to "feel the pain" for 3 full seconds before firing
+    cpu_pain_threshold: 0.85
+    ram_pain_threshold: 0.90
+    dwell_ms: 1500
+    poke_derivative: 10.0
   mouse:
-    track_target_xy: null      
-    error_threshold: 99999.0  
-    consecutive_frames: 999
+    track_target_xy: null
+    error_threshold: 99999.0    # dormant
+    consecutive_frames: 999     # Ignore small spikes; only react to massive jumps
 
 actions:
-  kill_process_dry_run: true   # NEVER flip without explicit user ask
-  snap_cursor_enabled: true
+  kill_process_dry_run: true  # Change to FALSE to let it actually stop the pain
 
 # Reflex modules are the bio-inspired research bit. Keep them on so the
 # translation/reflex stack is actually visible on a fresh install.
@@ -72,8 +69,8 @@ tools:
   open_url: true
   open_app: true
   search_web: true
-  type_text: false
-  run_shell: false
+  type_text: true
+  run_shell: true
   safe_apps:
     # Friendly name → Windows command. Extend freely.
     chrome: "chrome"

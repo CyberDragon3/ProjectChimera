@@ -73,57 +73,32 @@ async def run_app() -> None:
     command_queue: asyncio.Queue[str] = asyncio.Queue()
     stop_event = asyncio.Event()
 
-    # Tier 1 — LLM proxy chosen by cfg.llm.provider. The proxy lets the
-    # onboarding wizard hot-swap providers (Ollama↔OpenAI↔Anthropic) without
-    # restarting the app, so a user who finishes setup gets a live Jarvis
-    # on the provider they just picked.
     ollama = exec_layer.LLMClientProxy(cfg)
     if not await ollama.health():
         log.warning("LLM health check failed — Executive will retry on each call.")
 
-    # Dashboard / command-bar server
     from .dashboard.server import build_app, serve
     app = build_app(
         snapshot, policy_store, exec_bus, interrupt_bus, command_queue, cfg,
         llm_proxy=ollama,
     )
-
-    reflex_cfg = cfg.get("reflex") or {}
+    cfg["_exec_bus"] = exec_bus
+    cfg["_snapshot"] = snapshot
 
     tasks = [
         asyncio.create_task(trans_layer.run(stim_bus, cfg, stop_event, snapshot), name="translation"),
         asyncio.create_task(fly_mod.run(stim_bus, interrupt_bus, policy_store, snapshot, stop_event), name="fly"),
         asyncio.create_task(worm_mod.run(stim_bus, interrupt_bus, policy_store, snapshot, stop_event), name="worm"),
         asyncio.create_task(mouse_mod.run(stim_bus, interrupt_bus, policy_store, snapshot, stop_event), name="mouse"),
-        asyncio.create_task(exec_layer.run(ollama, exec_bus, policy_store, command_queue, snapshot), name="executive"),
+        asyncio.create_task(exec_layer.run(ollama, exec_bus, policy_store, command_queue, snapshot, cfg), name="executive"),
         asyncio.create_task(_action_loop(interrupt_bus, cfg, exec_bus, ollama, snapshot), name="actions"),
         asyncio.create_task(serve(app, cfg, stop_event), name="server"),
-        # Keep translation live so the dashboard shows real telemetry even before
-        # a reflex fires. The connectomes themselves remain individually gated.
-        asyncio.create_task(
-            trans_layer.run(stim_bus, cfg, stop_event, snapshot), name="translation",
-        ),
-        asyncio.create_task(
-            _action_loop(interrupt_bus, cfg, exec_bus, ollama, snapshot), name="actions",
-        ),
     ]
-    if reflex_cfg.get("fly_enabled"):
-        tasks.append(asyncio.create_task(
-            fly_mod.run(stim_bus, interrupt_bus, policy_store, snapshot, stop_event), name="fly",
-        ))
-    if reflex_cfg.get("worm_enabled"):
-        tasks.append(asyncio.create_task(
-            worm_mod.run(stim_bus, interrupt_bus, policy_store, snapshot, stop_event), name="worm",
-        ))
-    if reflex_cfg.get("mouse_enabled"):
-        tasks.append(asyncio.create_task(
-            mouse_mod.run(stim_bus, interrupt_bus, policy_store, snapshot, stop_event), name="mouse",
-        ))
+
     try:
         await asyncio.gather(*tasks)
     finally:
         stop_event.set()
-
 
 async def _action_loop(interrupt_bus: InterruptBus, cfg: dict[str, Any], exec_bus: ExecutiveBus,
                        ollama: Any, snapshot: Snapshot) -> None:
@@ -133,7 +108,7 @@ async def _action_loop(interrupt_bus: InterruptBus, cfg: dict[str, Any], exec_bu
     re-trigger the worm). One explanation per module per 4 seconds."""
     from .contracts import ExecutiveEvent
     from .event_bus import now_ns
-    EXPLAIN_COOLDOWN_NS = 4 * 1_000_000_000
+    EXPLAIN_COOLDOWN_NS = 30 * 1_000_000_000
     last_explain_ns: dict[str, int] = {}
     while True:
         event = await interrupt_bus.main.get()

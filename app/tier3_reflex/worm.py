@@ -80,7 +80,9 @@ class WormConnectome(Connectome):
         return np.clip(feat, 0.0, 1.0)
 
     async def _process(self, stim: PressureSample, policy: BioPolicy) -> Optional[InterruptEvent]:
-        wp = policy.worm
+        # Get current policy from policy store
+        current_policy = await self.policy_store.get()
+        wp = current_policy.worm
         t = int(stim.t_ns)
         dt = ((t - self._last_stim_ns) / 1e9) if self._last_stim_ns else 0.04
         self._last_stim_ns = t
@@ -92,7 +94,7 @@ class WormConnectome(Connectome):
         # Inhibitory gating: a low CPU-pain threshold means "the user said
         # stay alert" — sensitise the SNN. A high threshold means "the user
         # is running a heavy build, chill" — numb it.
-        gate = max(0.3, min(2.5, float(wp.cpu_pain_threshold) / 0.85))
+        gate = max(0.3, min(2.5, float(wp.cpu_pain_threshold) / wp.cpu_pain_threshold))
         feat = self._encode()
         fired, v_o = self.brain.step(feat, dt, gate=gate)
         self._drain_feedback(t, float(stim.cpu), float(stim.ram))

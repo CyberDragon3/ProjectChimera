@@ -119,6 +119,10 @@ class MouseConnectome(Connectome):
         fired, v_o = self.brain.step(feat, step_dt, gate=gate)
         self._drain_feedback(t_ns, err, thr_safe)
 
+        dormant = thr >= 9999.0
+        if dormant:
+            return None  # brain learns silently, nothing surfaces
+
         # Heuristic safety net retained.
         needed = max(1, int(policy.mouse.consecutive_frames))
         hit = err > thr
@@ -130,7 +134,7 @@ class MouseConnectome(Connectome):
         if heuristic_fire:
             self._streak = 0
 
-        if fired or heuristic_fire:
+        if (fired and not dormant) or heuristic_fire:
             self._pending_fb.append((t_ns, err))
             return InterruptEvent(
                 module="mouse", kind="error_spike",

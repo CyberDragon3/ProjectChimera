@@ -7,6 +7,8 @@ config explicitly allows it AND the user has opted in.
 from __future__ import annotations
 
 import logging
+import os
+import signal
 from typing import Any, Awaitable, Callable
 
 from .contracts import InterruptEvent
@@ -30,13 +32,50 @@ async def handle_kill_process(
     exec_bus: ExecutiveBus,
     snapshot: Snapshot,
 ) -> None:
-    """AVA recoil → dry-run kill notification."""
+    """AVA recoil → kill notification with self-preservation and context awareness."""
     dry = cfg.get("actions", {}).get("kill_process_dry_run", True)
-    msg = (
-        f"[REFLEX] worm AVA recoil fired (cpu={event.payload.get('cpu'):.2f} "
-        f"ram={event.payload.get('ram'):.2f}) — "
-        + ("dry-run: no process killed" if dry else "LIVE: kill disabled in MVP")
-    )
+    protected_processes = {"python", "ollama", "code", "vscode", "cmd", "wt", "explorer", "cursor"}
+    
+    payload = event.payload
+    cpu = payload.get("cpu", 0.0)
+    ram = payload.get("ram", 0.0)
+    process_name = payload.get("process_name", "").lower()
+    
+    # Priority 1: Check if the system is actually in pain based on config
+    if cpu < 0.85 and ram < 0.90:
+        return # Silent return; thresholds not met
+
+    # Priority 2: Self-Preservation (Don't kill the brain or the tools)
+    if process_name and any(proc in process_name for proc in protected_processes):
+        msg = f"[REFLEX] worm: pain detected (cpu={cpu:.2f}) but '{process_name}' is PROTECTED. Skipping."
+        log.warning(msg)
+        await _publish(exec_bus, snapshot, msg)
+        return
+
+    # Priority 3: Identify the Target (Active Shell PID vs General Culprit)
+    active_pid = getattr(snapshot, "active_shell_pid", None)
+    target_pid = active_pid if active_pid else int(payload.get("pid", 0))
+
+    if dry:
+        mode_str = "DRY-RUN"
+        msg = f"[REFLEX] worm {mode_str}: pain from '{process_name}' (PID {target_pid}) at cpu={cpu:.2f}. No action taken."
+        log.warning(msg)
+        await _publish(exec_bus, snapshot, msg)
+        return
+
+    # Priority 4: Execution
+    if target_pid > 0:
+        try:
+            os.kill(target_pid, signal.SIGTERM)
+            msg = f"[REFLEX] worm LIVE: Neutralized '{process_name}' (PID {target_pid}) to relieve system pain."
+            # Clear the shell PID tracker if we just killed it
+            if target_pid == active_pid:
+                snapshot.active_shell_pid = None
+        except Exception as e:
+            msg = f"[REFLEX] worm ERROR: Failed to kill PID {target_pid}: {str(e)}"
+    else:
+        msg = f"[REFLEX] worm: Pain detected but no valid PID found for '{process_name}'."
+
     log.warning(msg)
     await _publish(exec_bus, snapshot, msg)
 
@@ -47,8 +86,7 @@ async def handle_snap_cursor(
     exec_bus: ExecutiveBus,
     snapshot: Snapshot,
 ) -> None:
-    """Fly looming → no cursor snap in MVP; log only (pynput import deferred
-    by Agent-Translation). Extend here if desired."""
+    """Fly looming handler."""
     msg = f"[REFLEX] fly looming fired (flow={event.payload.get('flow'):.2f})"
     log.warning(msg)
     await _publish(exec_bus, snapshot, msg)
@@ -60,6 +98,7 @@ async def handle_error_spike(
     exec_bus: ExecutiveBus,
     snapshot: Snapshot,
 ) -> None:
+    """Mouse error spike handler."""
     msg = f"[REFLEX] mouse cortex error spike (err={event.payload.get('error'):.1f} px)"
     log.warning(msg)
     await _publish(exec_bus, snapshot, msg)

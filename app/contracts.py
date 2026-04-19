@@ -109,6 +109,6 @@ class InterruptEvent:
 class ExecutiveEvent:
     """Anything the LLM layer emits to the UI."""
     t_ns: int
-    kind: Literal["prompt", "policy", "explain", "status", "error"]
+    kind: Literal["prompt", "policy", "explain", "status", "error", "shell_output"]
     text: str = ""
     data: dict[str, Any] = field(default_factory=dict)

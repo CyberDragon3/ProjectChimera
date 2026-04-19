@@ -23,6 +23,7 @@ import math
 from typing import Any, Optional
 
 import numpy as np
+from numpy.random import sample
 
 from .contracts import BioPolicy, CursorSample, OmmatidiaFrame, PressureSample
 from .event_bus import Snapshot, StimulusBus, now_ns
@@ -71,6 +72,9 @@ async def run_ommatidia_sampler(
     region: Optional[dict[str, int]] = t_cfg.get("region")
 
     prev: Optional[np.ndarray] = None
+    last_fire_ns: Optional[int] = None
+    cooldown_ns: int = int(1_000_000_000)  # 1 second cooldown
+    flow_threshold: float = 0.5  # Increased from 0.35 to 0.5
     loop = asyncio.get_event_loop()
 
     with mss.mss() as sct:
@@ -106,9 +110,17 @@ async def run_ommatidia_sampler(
                 diff = (lum - prev).astype(np.float32)
             prev = lum
 
-            frame = OmmatidiaFrame(t_ns=now_ns(), luminance=lum, diff=diff)
-            await stim_bus.put_ommatidia(frame)
-            snapshot.ommatidia = frame
+# Check cooldown before firing
+            current_time_ns = now_ns()
+            # Calculate flow rate (average of all diff values)
+            flow_rate = np.mean(diff)
+            # Only fire if flow rate exceeds threshold
+            if flow_rate > flow_threshold:
+                if last_fire_ns is None or (current_time_ns - last_fire_ns) >= cooldown_ns:
+                    frame = OmmatidiaFrame(t_ns=current_time_ns, luminance=lum, diff=diff)
+                    await stim_bus.put_ommatidia(frame)
+                    snapshot.ommatidia = frame
+                    last_fire_ns = current_time_ns
 
             # update sugar concentration snapshot (cheap)
             if snapshot.policy is not None and snapshot.cursor is not None:
@@ -219,6 +231,10 @@ async def run_cursor_sampler(
     prev_x: Optional[int] = None
     prev_y: Optional[int] = None
     prev_t_ns: Optional[int] = None
+    last_fire_ns: Optional[int] = None
+    cooldown_ns: int = int(100_000_000)  # 100ms cooldown
+    velocity_threshold: float = 50.0  # pixels per second
+    error_threshold: float = 100.0  # pixels
     loop = asyncio.get_event_loop()
 
     while not stop_event.is_set():
@@ -240,9 +256,16 @@ async def run_cursor_sampler(
 
         prev_x, prev_y, prev_t_ns = x, y, t_ns
 
-        sample = CursorSample(t_ns=t_ns, x=x, y=y, vx=vx, vy=vy)
-        await stim_bus.put_cursor(sample)
-        snapshot.cursor = sample
+# Check cooldown and velocity threshold before firing
+        current_time_ns = now_ns()
+        speed = math.sqrt(vx * vx + vy * vy)
+        if last_fire_ns is None or (current_time_ns - last_fire_ns) >= cooldown_ns:
+            if speed >= velocity_threshold:
+                # Only fire if error is below threshold
+                if speed < error_threshold:
+                    sample = CursorSample(t_ns=t_ns, x=x, y=y, vx=vx, vy=vy)
+                    await stim_bus.put_cursor(sample)
+                    snapshot.cursor = sample
 
         elapsed = loop.time() - start
         await asyncio.sleep(max(0.0, target_dt - elapsed))

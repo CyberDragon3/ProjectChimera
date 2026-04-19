@@ -132,9 +132,10 @@ class FlyConnectome(Connectome):
         # day 1 even before any learning has happened. R-STDP then teaches
         # the SNN which input shapes actually matter.
         thr = self._effective_threshold(policy)
-        heuristic_fire = flow > thr
+        dormant = policy.fly.looming_threshold >= 1.0
+        heuristic_fire = flow > thr and not dormant
 
-        if fired or heuristic_fire:
+        if (fired and not dormant) or heuristic_fire:
             self._pending_fb.append((t_ns, flow))
             return InterruptEvent(
                 module="fly", kind="looming",

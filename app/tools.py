@@ -7,6 +7,8 @@ executes it. Destructive tools are gated by a per-tool allow flag in
 """
 from __future__ import annotations
 
+from .contracts import ExecutiveEvent
+from .event_bus import now_ns
 import asyncio
 import logging
 import os
@@ -112,6 +114,32 @@ def catalog_prompt(cfg: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 # Tool implementations
 # ---------------------------------------------------------------------------
+
+async def run_shell_streaming(cmd: str, exec_bus, snapshot, allowed: bool) -> tuple[bool, str]:
+    if not allowed:
+        return False, "run_shell is disabled."
+    
+    process = await asyncio.create_subprocess_shell(
+        cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    
+    # Store PID so worm knows which process is causing pain
+    snapshot.active_shell_pid = process.pid
+    
+    output_lines = []
+    async for line in process.stdout:
+        text = line.decode().strip()
+        output_lines.append(text)
+        # Feed each line to exec_bus so Jarvis sees it
+        await exec_bus.publish(ExecutiveEvent(
+            t_ns=now_ns(), kind="shell_output", text=text
+        ))
+    
+    await process.wait()
+    snapshot.active_shell_pid = None
+    return process.returncode == 0, "\n".join(output_lines[-10:])
 
 async def _run_blocking(func, *args, **kwargs):
     """Run a blocking call in a thread so we don't freeze the event loop."""
@@ -263,6 +291,15 @@ async def execute(tool: str, args: dict[str, Any], cfg: dict[str, Any]) -> tuple
         )
 
     if tool == "run_shell":
+        exec_bus = cfg.get("_exec_bus")
+        snapshot = cfg.get("_snapshot")
+        if exec_bus and snapshot:
+            return await run_shell_streaming(
+                str((args or {}).get("cmd", "")),
+                exec_bus,
+                snapshot,
+                bool(tools_cfg.get("run_shell", False)),
+            )
         return await run_shell(
             str((args or {}).get("cmd", "")),
             bool(tools_cfg.get("run_shell", False)),
