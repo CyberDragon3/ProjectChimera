@@ -1,0 +1,60 @@
+# Project Chimera default configuration
+# Copy to chimera.local.toml for overrides.
+
+[protected_species]
+# Processes that Chimera can NEVER terminate or forcibly de-prioritize.
+# Loaded once at boot into an immutable frozenset.
+processes = [
+    "System",
+    "Registry",
+    "smss.exe",
+    "csrss.exe",
+    "wininit.exe",
+    "winlogon.exe",
+    "services.exe",
+    "lsass.exe",
+    "svchost.exe",
+    "dwm.exe",
+    "explorer.exe",
+    "SystemSettings.exe",
+    "python.exe",
+    "pythonw.exe",
+    "Code.exe",
+    "cursor.exe",
+    "chrome.exe",
+    "firefox.exe",
+    "msedge.exe",
+]
+
+[thresholds]
+cpu_spike_percent = 85.0          # %
+cpu_sustained_seconds = 1.0        # seconds above threshold before reflex fires
+thermal_slope_c_per_min = 2.5      # °C/min — Zebrafish alert
+idle_seconds = 300                 # seconds of input inactivity = "away"
+reflex_deadline_ms = 10            # hard deadline per reflex tick
+
+[poll]
+cpu_interval_ms = 250
+idle_interval_ms = 1000
+thermal_interval_ms = 5000
+window_interval_ms = 1000
+
+[store]
+ring_buffer_seconds = 300          # retain 5 min of telemetry per metric
+
+[llm]
+enabled = false
+provider = "ollama"                # "ollama" | "claude"
+model = "phi3:mini"                # for ollama
+claude_model = "claude-haiku-4-5"
+min_interval_seconds = 30          # circuit breaker
+max_daily_calls = 500
+
+[dashboard]
+enabled = true
+host = "127.0.0.1"
+port = 8765
+
+[logging]
+level = "INFO"
+format = "json"                    # "json" | "console"
