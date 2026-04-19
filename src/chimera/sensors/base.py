@@ -24,8 +24,8 @@ class IdleBackend(Protocol):
 
 
 class WindowBackend(Protocol):
-    def foreground(self) -> tuple[str, str]:
-        """Return (exe_name, window_title)."""
+    def foreground(self) -> tuple[str, str, int | None]:
+        """Return (exe_name, window_title, pid)."""
         ...
 
 

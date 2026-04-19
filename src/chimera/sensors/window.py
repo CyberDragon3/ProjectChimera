@@ -27,22 +27,27 @@ class Win32WindowBackend:
         self._gui = win32gui
         self._proc = win32process
 
-    def foreground(self) -> tuple[str, str]:
+    def foreground(self) -> tuple[str, str, int | None]:
         hwnd = self._gui.GetForegroundWindow()
         if not hwnd:
-            return ("", "")
+            return ("", "", None)
         title = self._gui.GetWindowText(hwnd) or ""
+        exe = ""
+        pid: int | None = None
         try:
-            _, pid = self._proc.GetWindowThreadProcessId(hwnd)
-            exe = psutil.Process(pid).name() if pid and pid > 0 else ""
+            _, raw_pid = self._proc.GetWindowThreadProcessId(hwnd)
+            if raw_pid and raw_pid > 0:
+                pid = int(raw_pid)
+                exe = psutil.Process(pid).name()
         except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError, OSError):
-            exe = ""
-        return (exe, title)
+            # Keep whatever pid we got; exe may be empty if psutil lookup failed.
+            pass
+        return (exe, title, pid)
 
 
 class NullWindowBackend:
-    def foreground(self) -> tuple[str, str]:
-        return ("", "")
+    def foreground(self) -> tuple[str, str, int | None]:
+        return ("", "", None)
 
 
 def make_default_window_backend() -> WindowBackend:
@@ -61,7 +66,7 @@ class WindowSensor:
         self._bus = bus
         self._backend = backend
         self._interval = interval_ms / 1000.0
-        self._last: tuple[str, str] | None = None
+        self._last: tuple[str, str, int | None] | None = None
 
     async def run(self) -> None:
         log.info("sensor.window.start", interval_ms=int(self._interval * 1000))
@@ -71,11 +76,11 @@ class WindowSensor:
                 current = await asyncio.to_thread(self._backend.foreground)
                 if current != self._last and current[0]:
                     self._last = current
-                    exe, title = current
+                    exe, title, pid = current
                     self._bus.publish(
                         Event(
                             topic="window.foreground",
-                            payload={"exe": exe, "title": title},
+                            payload={"exe": exe, "title": title, "pid": pid},
                             ts=time.monotonic(),
                         )
                     )
