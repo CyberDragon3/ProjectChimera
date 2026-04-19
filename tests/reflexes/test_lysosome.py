@@ -152,3 +152,13 @@ async def test_rate_limit_prevents_double_sweep():
         with contextlib.suppress(asyncio.CancelledError):
             await task
     assert r.sweep_count == 1
+
+
+@pytest.mark.windows
+def test_win32_backend_importable():
+    import sys
+    if sys.platform != "win32":
+        pytest.skip("Win32 backend requires Windows")
+    from chimera.reflexes.lysosome import Win32LysosomeBackend
+    b = Win32LysosomeBackend()
+    assert b.trim_working_set([4294967290]) == 0  # non-existent PID

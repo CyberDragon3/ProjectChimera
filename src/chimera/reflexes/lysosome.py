@@ -191,3 +191,64 @@ def _default_pid_scanner() -> list[tuple[int, str]]:
         except Exception:
             continue
     return out
+
+
+class Win32LysosomeBackend:
+    """Real Windows backend — uses psapi + kernel32 via ctypes."""
+
+    _PROCESS_SET_QUOTA = 0x0100
+    _PROCESS_QUERY_INFORMATION = 0x0400
+    _PROCESS_TERMINATE = 0x0001
+
+    def __init__(self) -> None:
+        if sys.platform != "win32":
+            raise RuntimeError("Win32LysosomeBackend requires Windows")
+        import ctypes
+        self._kernel32 = ctypes.windll.kernel32
+        self._psapi = ctypes.windll.psapi
+
+    def trim_working_set(self, pids: Iterable[int]) -> int:
+        trimmed = 0
+        for pid in pids:
+            h = self._kernel32.OpenProcess(
+                self._PROCESS_SET_QUOTA | self._PROCESS_QUERY_INFORMATION,
+                False, int(pid),
+            )
+            if not h:
+                continue
+            try:
+                if self._psapi.EmptyWorkingSet(h):
+                    trimmed += 1
+            finally:
+                self._kernel32.CloseHandle(h)
+        return trimmed
+
+    def flush_system_cache(self) -> int | None:
+        import ctypes
+        SIZE_T = ctypes.c_size_t
+        res = self._kernel32.SetSystemFileCacheSize(
+            SIZE_T(-1), SIZE_T(-1), ctypes.c_ulong(0)
+        )
+        if not res:
+            err = self._kernel32.GetLastError()
+            log.warning("reflex.lysosome.cache_flush_failed", winerr=err)
+            return None
+        return 0
+
+    def kill(self, pid: int) -> bool:
+        import psutil
+        try:
+            psutil.Process(int(pid)).kill()
+            return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+            log.warning("reflex.lysosome.kill_failed", pid=pid, error=str(e))
+            return False
+
+
+def make_default_lysosome_backend() -> LysosomeBackend:
+    if sys.platform == "win32":
+        try:
+            return Win32LysosomeBackend()
+        except Exception as e:
+            log.warning("reflex.lysosome.win32_unavailable", error=str(e))
+    return NullLysosomeBackend()
