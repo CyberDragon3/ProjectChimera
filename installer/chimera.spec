@@ -96,6 +96,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=None,
+    uac_admin=True,  # Lysosome needs SE_INCREASE_QUOTA for SetSystemFileCacheSize
 )
 
 coll = COLLECT(

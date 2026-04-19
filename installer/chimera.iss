@@ -61,7 +61,7 @@ begin
   begin
     if IsTaskSelected('logonstartup') then
     begin
-      Params := '/Create /F /SC ONLOGON /RL LIMITED /TN "Chimera" /TR "\"' +
+      Params := '/Create /F /SC ONLOGON /RL HIGHEST /TN "Chimera" /TR "\"' +
                 ExpandConstant('{app}\{#AppExeName}') + '\" --tray"';
       if not Exec(ExpandConstant('{sys}\schtasks.exe'), Params, '',
                   SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
