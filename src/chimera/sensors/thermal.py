@@ -63,10 +63,22 @@ class NullThermalBackend:
 
 
 def make_default_thermal_backend() -> ThermalBackend:
-    if sys.platform == "win32":
-        try:
-            return LhmThermalBackend()
-        except Exception as e:
+    if sys.platform != "win32":
+        return NullThermalBackend()
+    try:
+        return LhmThermalBackend()
+    except Exception as e:
+        msg = str(e).lower()
+        if "invalid namespace" in msg or "0x8004100e" in msg or "2147217394" in msg:
+            log.warning(
+                "sensor.thermal.lhm_service_missing",
+                error=str(e),
+                remediation=(
+                    "LibreHardwareMonitor WMI namespace not found. "
+                    "Install + run LHM as admin: scripts/install_lhm.ps1"
+                ),
+            )
+        else:
             log.warning("sensor.thermal.unavailable", error=str(e))
     return NullThermalBackend()
 
