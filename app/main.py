@@ -91,7 +91,12 @@ async def run_app() -> None:
     reflex_cfg = cfg.get("reflex") or {}
 
     tasks = [
-        asyncio.create_task(exec_layer.run(ollama, exec_bus, policy_store, command_queue, snapshot, cfg), name="executive"),
+        asyncio.create_task(trans_layer.run(stim_bus, cfg, stop_event, snapshot), name="translation"),
+        asyncio.create_task(fly_mod.run(stim_bus, interrupt_bus, policy_store, snapshot, stop_event), name="fly"),
+        asyncio.create_task(worm_mod.run(stim_bus, interrupt_bus, policy_store, snapshot, stop_event), name="worm"),
+        asyncio.create_task(mouse_mod.run(stim_bus, interrupt_bus, policy_store, snapshot, stop_event), name="mouse"),
+        asyncio.create_task(exec_layer.run(ollama, exec_bus, policy_store, command_queue, snapshot), name="executive"),
+        asyncio.create_task(_action_loop(interrupt_bus, cfg, exec_bus, ollama, snapshot), name="actions"),
         asyncio.create_task(serve(app, cfg, stop_event), name="server"),
         # Keep translation live so the dashboard shows real telemetry even before
         # a reflex fires. The connectomes themselves remain individually gated.
@@ -126,29 +131,24 @@ async def _action_loop(interrupt_bus: InterruptBus, cfg: dict[str, Any], exec_bu
     narration — but throttle per-module so a chattering connectome doesn't
     stack up Ollama requests (which would then themselves spike CPU and
     re-trigger the worm). One explanation per module per 4 seconds."""
+    from .contracts import ExecutiveEvent
     from .event_bus import now_ns
-
     EXPLAIN_COOLDOWN_NS = 4 * 1_000_000_000
     last_explain_ns: dict[str, int] = {}
-    explain_tasks: set[asyncio.Task[None]] = set()
-    try:
-        while True:
-            event = await interrupt_bus.main.get()
-            await actions.dispatch(event, cfg, exec_bus, snapshot)
-            t = now_ns()
-            if t - last_explain_ns.get(event.module, 0) < EXPLAIN_COOLDOWN_NS:
-                continue
-            last_explain_ns[event.module] = t
-
-            task = asyncio.create_task(
-                exec_layer.explain_and_publish(ollama, exec_bus, snapshot, event),
-                name=f"explain-{event.module}",
-            )
-            explain_tasks.add(task)
-            task.add_done_callback(explain_tasks.discard)
-    finally:
-        for task in explain_tasks:
-            task.cancel()
+    while True:
+        event = await interrupt_bus.main.get()
+        await actions.dispatch(event, cfg, exec_bus, snapshot)
+        t = now_ns()
+        if t - last_explain_ns.get(event.module, 0) < EXPLAIN_COOLDOWN_NS:
+            continue
+        last_explain_ns[event.module] = t
+        try:
+            explanation = await exec_layer.explain_reflex(ollama, event)
+            await exec_bus.publish(ExecutiveEvent(
+                t_ns=now_ns(), kind="explain", text=explanation,
+                data={"event_kind": event.kind, "module": event.module}))
+        except Exception as e:  # noqa: BLE001
+            log.warning("explain_reflex failed: %s", e)
 
 
 if __name__ == "__main__":

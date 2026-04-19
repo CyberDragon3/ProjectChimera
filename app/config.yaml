@@ -17,7 +17,7 @@ llm:
 # Legacy block — still honored when llm.provider == "ollama" and fields are omitted above.
 ollama:
   host: "http://localhost:11434"
-  model: "qwen2.5:0.5b"
+  model: "qwen2.5:1.5b"
   timeout_s: 30.0
   temperature: 0.1
 
@@ -40,18 +40,20 @@ translation:
 
 # Default policy — can be overridden live by the Executive.
 policy:
+  # Default policy — can be overridden live by the Executive.
+policy:
   fly:
-    sensitivity: 0.5           # 0..1, scales looming threshold inversely
-    looming_threshold: 0.35
+    sensitivity: 0.0          # dormant
+    looming_threshold: 1.0    # unreachable threshold
   worm:
-    cpu_pain_threshold: 0.85   # fraction 0..1 of CPU %
-    ram_pain_threshold: 0.90
-    poke_derivative: 0.80      # d(pressure)/dt that counts as a "poke" — 0.8 /s avoids psutil jitter firing
-    dwell_ms: 800              # sustained-pressure dwell before AVA fires
+    cpu_pain_threshold: 0.60   # 60% — Just above Defender's 50% default throttle limit
+    ram_pain_threshold: 0.85   # 85% — High enough to ignore browser caching, low enough to stop OOM crashes
+    poke_derivative: 1.50      # 1.5/s — Makes the worm ignore normal app-launch spikes
+    dwell_ms: 3000             # 3000ms — Forces the worm to "feel the pain" for 3 full seconds before firing
   mouse:
-    track_target_xy: null      # [x, y] or null
-    error_threshold: 120.0     # px prediction error
-    consecutive_frames: 3
+    track_target_xy: null      
+    error_threshold: 99999.0  
+    consecutive_frames: 999
 
 actions:
   kill_process_dry_run: true   # NEVER flip without explicit user ask

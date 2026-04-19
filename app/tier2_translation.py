@@ -2,12 +2,16 @@
 
 OWNER: Agent-Translation.
 
-Implements three async samplers that convert digital signals into biological
-stimuli and push them onto the StimulusBus:
-  * run_ommatidia_sampler — screen -> NxN luminance grid (~30 Hz)
-  * run_pressure_sampler  — CPU+RAM -> fused pressure (~20 Hz)
+Converts digital system signals into biological stimuli for the three
+animal connectome modules:
+  * run_ommatidia_sampler — screen pixels -> NxN luminance grid (~30 Hz)
+                            mimics Drosophila compound eye (fly module input)
+  * run_pressure_sampler  — CPU+RAM -> fused somatosensory pressure (~20 Hz)
+                            mimics C. elegans skin touch (worm module input)
   * run_cursor_sampler    — cursor position + velocity (~60 Hz)
-  * compute_sugar         — 2D-Gaussian attractor field for the dashboard.
+                            mimics MICrONS mouse visual cortex input stream
+  * compute_sugar         — 2D-Gaussian attractor field centered on policy
+                            target, models chemical gradient for chemotaxis
   * run                   — asyncio.gather convenience for main.py
 
 Contracts (do not change): see app/contracts.py.

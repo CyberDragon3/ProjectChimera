@@ -3,15 +3,18 @@
 OWNER: Agent-Executive.
 
 Implements:
-  * ``LLMClient`` protocol (async ``health`` / ``chat`` / ``aclose``) with
-    concrete backends for Ollama, OpenAI-compatible endpoints, and Anthropic.
-  * ``build_llm_client(cfg)`` — factory that reads ``cfg["llm"]["provider"]``.
+  * OllamaClient — thin async httpx wrapper around a local Ollama instance.
   * parse_intent — natural-language -> BioPolicy via few-shot + robust JSON.
   * explain_reflex — post-hoc, Jarvis-style explanation of a reflex fire.
-  * run — async loop: consume user commands, update policy, publish events.
+  * run            — async loop: consume user commands, update policy, publish events.
+
+Connectome modules governed:
+- fly and mouse modules are DORMANT by default. Only enable them when the user explicitly asks you to watch something.
+- When enabled, their events will be fed back to you silently. You decide what's worth telling the user.
+- Worm always runs independently — do not adjust worm thresholds unless explicitly asked.
 
 Design notes:
-  * Small local models emit sloppy JSON. Strip fences, extract first balanced
+  * qwen2.5:0.5b emits sloppy JSON. Strip fences, extract first balanced
     {...}, json.loads; on any failure fall back to current_policy and
     publish an ExecutiveEvent(kind="error", ...). The run loop never
     crashes on parse or transport errors.
