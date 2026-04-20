@@ -31,6 +31,7 @@ def test_state_has_neuro_block() -> None:
         assert "mouse_rate" in neuro
         assert "last_zebrafish_spike" in neuro
         assert "last_fly_spike" in neuro
+        assert "worm" in neuro
         assert neuro["dopamine"]["level"] == 0.0
         assert neuro["dopamine"]["hit_rate"] == 0.5
         assert neuro["dopamine"]["last_outcome"] is None
@@ -39,6 +40,9 @@ def test_state_has_neuro_block() -> None:
         assert neuro["mouse_rate"]["i_rate_hz"] == 0.0
         assert neuro["last_zebrafish_spike"] is None
         assert neuro["last_fly_spike"] is None
+        assert neuro["worm"]["available"] is False
+        assert neuro["worm"]["neuron_count"] == 0
+        assert neuro["worm"]["status"] == "idle"
     _ = bus
 
 
@@ -102,3 +106,32 @@ def test_neuro_zebrafish_spike_captured() -> None:
         assert spike["v"] == -49.5
         assert spike["current"] == 12.3
         assert spike["ts"] == 789.0
+
+
+def test_neuro_worm_state_captured() -> None:
+    bus, client = _make_client()
+    with client:
+        bus.publish(
+            Event(
+                topic="neuro.worm.state",
+                payload={
+                    "available": True,
+                    "neuron_count": 302,
+                    "active_count": 14,
+                    "active_fraction": 14 / 302,
+                    "status": "throttle",
+                    "sample": ["ADAL", "ADAR"],
+                    "active_neurons": ["ADAL", "ADAR"],
+                    "graphs_dir": "C:/bundle/graphs",
+                },
+                ts=999.0,
+            )
+        )
+        time.sleep(0.1)
+        worm = client.get("/state").json()["neuro"]["worm"]
+        assert worm["available"] is True
+        assert worm["neuron_count"] == 302
+        assert worm["active_count"] == 14
+        assert worm["status"] == "throttle"
+        assert worm["active_neurons"] == ["ADAL", "ADAR"]
+        assert worm["ts"] == 999.0

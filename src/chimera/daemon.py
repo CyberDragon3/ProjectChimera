@@ -16,6 +16,7 @@ from chimera.neuro.dopamine import DopamineModulator
 from chimera.reflexes.fly import FlyNeuroReflex, FlyReflex
 from chimera.reflexes.lysosome import LysosomeReflex, make_default_lysosome_backend
 from chimera.reflexes.mouse import MouseCortex, MouseReflex
+from chimera.reflexes.openworm import OpenWormDrive, OpenWormReflex
 from chimera.reflexes.worm import PsutilThrottler, WormReflex
 from chimera.reflexes.zebrafish import ZebrafishNeuroReflex, ZebrafishReflex
 from chimera.safety import ProtectedSpecies
@@ -146,12 +147,15 @@ class Chimera:
         )
 
         # Reflexes.
+        openworm_drive = OpenWormDrive()
         worm = WormReflex(
             self.bus,
             self.safety,
             PsutilThrottler(),
+            openworm=openworm_drive,
             deadline_ms=s.thresholds.reflex_deadline_ms,
         )
+        openworm = OpenWormReflex(self.bus)
         if s.neuro.enabled:
             fly = FlyNeuroReflex(self.bus, neuro_cfg=s.neuro)
             zebrafish = ZebrafishNeuroReflex(
@@ -193,6 +197,7 @@ class Chimera:
             ("sensor.window", window_sensor),
             ("sensor.thermal", thermal_sensor),
             ("reflex.worm", worm),
+            ("reflex.openworm", openworm),
             ("reflex.fly", fly),
             ("reflex.zebrafish", zebrafish),
             ("reflex.mouse", mouse),
@@ -214,6 +219,7 @@ class Chimera:
 
             try:
                 from chimera.brains import BRAINS_AVAILABLE  # type: ignore[import-not-found]
+                openworm_state = OpenWormReflex(self.bus).initial_state()
             except Exception:
                 BRAINS_AVAILABLE = {
                     "psutil": True,
@@ -221,6 +227,7 @@ class Chimera:
                     "bmtk": False,
                     "flygym": False,
                 }
+                openworm_state = None
 
             runtime_flags = {
                 "neuro_enabled": bool(s.neuro.enabled),
@@ -234,6 +241,7 @@ class Chimera:
                 protected_species=frozenset(self.safety.members),
                 brains_available=BRAINS_AVAILABLE,
                 runtime_flags=runtime_flags,
+                worm_state=openworm_state,
             )
             config = uvicorn.Config(
                 app,

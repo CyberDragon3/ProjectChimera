@@ -46,6 +46,7 @@ dev = [
 # the daemon runs at full performance without any of these.
 brains = [
     "owmeta>=0.12",          # C. elegans 302-neuron connectome (Worm)
+    "setuptools<82",         # owmeta_core still imports legacy pkg_resources
     "bmtk>=1.1",             # Allen Institute Brain Modeling Toolkit (Mouse GLIF)
     "flygym[examples]>=1.0", # MuJoCo fruit-fly biomechanics (Fly)
 ]

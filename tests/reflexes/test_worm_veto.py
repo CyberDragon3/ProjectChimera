@@ -8,6 +8,7 @@ import time
 import pytest
 
 from chimera.bus import Bus, Event
+from chimera.reflexes.openworm import OpenWormDrive
 from chimera.reflexes.worm import WormReflex
 from chimera.safety import ProtectedSpecies
 
@@ -24,8 +25,38 @@ def _make() -> tuple[Bus, ProtectedSpecies, _RecordingThrottler, WormReflex]:
     bus = Bus()
     safety = ProtectedSpecies.from_list(["winlogon.exe"])
     throttler = _RecordingThrottler()
-    worm = WormReflex(bus, safety, throttler, deadline_ms=50)
+    worm = WormReflex(
+        bus,
+        safety,
+        throttler,
+        openworm=OpenWormDrive(neuron_names=tuple(f"N{i:03d}" for i in range(302))),
+        deadline_ms=50,
+    )
     return bus, safety, throttler, worm
+
+
+async def test_mouse_veto_still_beats_openworm_modulation():
+    bus, _, throttler, worm = _make()
+    task = asyncio.create_task(worm.run())
+    try:
+        await asyncio.sleep(0.01)
+        bus.publish(Event(
+            topic="cortex.protect_foreground",
+            payload={"on": True, "foreground_pid": 1234},
+            ts=time.monotonic(),
+        ))
+        await asyncio.sleep(0.01)
+        bus.publish(Event(
+            topic="cpu.spike",
+            payload={"pid": 1234, "exe": "hog.exe", "cpu_percent": 99.0},
+            ts=time.monotonic(),
+        ))
+        await asyncio.sleep(0.05)
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+    assert throttler.calls == []
 
 
 async def test_default_path_demotes():

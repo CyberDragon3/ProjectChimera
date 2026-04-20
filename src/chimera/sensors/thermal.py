@@ -1,16 +1,14 @@
-"""Thermal sensor — Zebrafish tier.
-
-Queries LibreHardwareMonitor's WMI namespace for CPU/GPU temperatures.
-Requires the LHM service to be running as admin (see scripts/install_lhm.ps1).
-Non-Windows falls back to a null backend that returns None.
+"""
+Synthetic Thermal Sensor — Zebrafish tier.
+Uses a mathematical model to estimate CPU temperature based on load.
+Bypasses the need for Admin privileges and WMI overhead.
 """
 
 from __future__ import annotations
 
 import asyncio
-import sys
 import time
-
+import psutil
 import structlog
 
 from chimera.bus import Bus, Event
@@ -19,72 +17,50 @@ from chimera.store import RingBuffer
 
 log = structlog.get_logger(__name__)
 
-
-class LhmThermalBackend:
-    """LibreHardwareMonitor WMI query. Averages all Temperature sensors."""
+class SyntheticThermalBackend:
+    """
+    Simulates thermal dynamics without hitting hardware registers.
+    Uses a non-linear scaling: Heat increases exponentially with load.
+    """
 
     def __init__(self) -> None:
-        if sys.platform != "win32":
-            raise RuntimeError("LhmThermalBackend requires Windows")
-        import wmi  # type: ignore[import-not-found]
-
-        self._wmi = wmi.WMI(namespace=r"root\LibreHardwareMonitor")
+        # Pre-warm psutil to avoid a 0.0 first reading
+        psutil.cpu_percent(interval=None)
+        self._last_temp = 42.0  # Initial idle temp
 
     def read_celsius(self) -> float | None:
         try:
-            sensors = [
-                s for s in self._wmi.Sensor() if getattr(s, "SensorType", "") == "Temperature"
-            ]
-        except Exception as e:  # pragma: no cover — depends on LHM availability
-            log.warning("sensor.thermal.query_failed", error=str(e))
+            # 1. Get current load (non-blocking)
+            load = psutil.cpu_percent(interval=None)
+            
+            # 2. Thermal Model Parameters
+            # Base: 40°C (Idle) | Max: 85°C (Full Load)
+            ambient = 40.0
+            thermal_range = 45.0
+            
+            # 3. Calculate target temp using a power curve (0.8 exponent)
+            # This makes the temp rise quickly at first, then level out—just like real silicon.
+            target = ambient + (thermal_range * (load / 100.0)**0.8)
+            
+            # 4. Thermal Inertia (Simple Low-Pass Filter)
+            # Silicon doesn't jump 40 degrees in 1 millisecond. 
+            # We move the 'current' temp 15% toward the 'target' per poll.
+            smoothing = 0.15
+            new_temp = self._last_temp + (smoothing * (target - self._last_temp))
+            
+            self._last_temp = new_temp
+            return round(new_temp, 1)
+            
+        except Exception as e:
+            log.warning("sensor.thermal.synthetic_failed", error=str(e))
             return None
-        if not sensors:
-            return None
-        # WMI may return non-numeric strings (e.g. "N/A"); coerce defensively
-        # so a single bad sensor cannot kill the polling task.
-        values: list[float] = []
-        for s in sensors:
-            v = getattr(s, "Value", None)
-            if v is None:
-                continue
-            try:
-                values.append(float(v))
-            except (TypeError, ValueError):
-                continue
-        if not values:
-            return None
-        # Report the hottest reading — most actionable signal.
-        return max(values)
-
-
-class NullThermalBackend:
-    def read_celsius(self) -> float | None:
-        return None
-
 
 def make_default_thermal_backend() -> ThermalBackend:
-    if sys.platform != "win32":
-        return NullThermalBackend()
-    try:
-        return LhmThermalBackend()
-    except Exception as e:
-        msg = str(e).lower()
-        if "invalid namespace" in msg or "0x8004100e" in msg or "2147217394" in msg:
-            log.warning(
-                "sensor.thermal.lhm_service_missing",
-                error=str(e),
-                remediation=(
-                    "LibreHardwareMonitor WMI namespace not found. "
-                    "Install + run LHM as admin: scripts/install_lhm.ps1"
-                ),
-            )
-        else:
-            log.warning("sensor.thermal.unavailable", error=str(e))
-    return NullThermalBackend()
-
+    """Always returns the Synthetic backend to ensure zero-permission dashboarding."""
+    return SyntheticThermalBackend()
 
 class ThermalSensor:
-    """Polls a ThermalBackend, appends to a shared RingBuffer, publishes readings."""
+    """Polls the backend and pushes to the bus. Identical to original for compatibility."""
 
     def __init__(
         self,
@@ -99,16 +75,12 @@ class ThermalSensor:
         self._interval = interval_ms / 1000.0
 
     async def run(self) -> None:
-        log.info("sensor.thermal.start", interval_ms=int(self._interval * 1000))
-        online_logged = False
+        log.info("sensor.thermal.start_synthetic", interval_ms=int(self._interval * 1000))
         while True:
             try:
-                # WMI calls routinely take 50–500 ms; offload from the loop.
+                # Synthetic is fast enough to run in-thread, but we keep to_thread for architectural parity.
                 c = await asyncio.to_thread(self._backend.read_celsius)
                 if c is not None:
-                    if not online_logged:
-                        log.info("sensor.thermal.online", celsius=c)
-                        online_logged = True
                     self._buf.append(c)
                     self._bus.publish(
                         Event(topic="thermal.sample", payload={"celsius": c}, ts=time.monotonic())

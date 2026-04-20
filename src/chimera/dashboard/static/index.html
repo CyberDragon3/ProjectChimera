@@ -200,7 +200,7 @@
     <div class="panel animal" id="a-worm">
       <span class="badge" id="worm-badge">THROTTLE</span>
       <div class="name">Worm</div>
-      <div class="sub">0 neurons · reflex</div>
+      <div class="sub" id="worm-sub">OpenWorm connectome</div>
       <div class="big"><span id="worm-val">idle</span></div>
       <div class="bar" id="worm-bar"></div>
     </div>
@@ -549,6 +549,17 @@
         pushRaster(e);
       } else if (topic === "neuro.dopamine") {
         setDopamine(payload.level, payload.hit_rate, payload.last_outcome);
+      } else if (topic === "neuro.worm.state") {
+        const status = payload.status || "idle";
+        document.getElementById("worm-val").textContent = status;
+        document.getElementById("worm-sub").textContent =
+          `${payload.neuron_count ?? 0} neurons · OpenWorm`;
+        setBar("worm-bar", payload.active_fraction ?? 0);
+        if (status === "throttle") {
+          flash("a-worm", true);
+        } else if (status === "spike") {
+          flash("a-worm");
+        }
       } else if (topic === "reflex.worm.throttle") {
         flash("a-worm", true);
         document.getElementById("worm-val").textContent = "throttle";
@@ -642,6 +653,12 @@
         const e = n.mouse_rate.e_rate_hz ?? 0;
         document.getElementById("rate-e").textContent = e.toFixed(2) + " Hz";
         document.getElementById("rate-i").textContent = (n.mouse_rate.i_rate_hz ?? 0).toFixed(2) + " Hz";
+      }
+      if (n.worm) {
+        document.getElementById("worm-val").textContent = n.worm.status ?? "idle";
+        document.getElementById("worm-sub").textContent =
+          `${n.worm.neuron_count ?? 0} neurons · OpenWorm`;
+        setBar("worm-bar", n.worm.active_fraction ?? 0);
       }
       // protected
       if (Array.isArray(j.protected_species)) {

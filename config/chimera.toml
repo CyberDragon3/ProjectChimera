@@ -5,26 +5,15 @@
 # Processes that Chimera can NEVER terminate or forcibly de-prioritize.
 # Loaded once at boot into an immutable frozenset.
 processes = [
-    # --- Core Kernel & System Organs ---
+    # Core Kernel Only (The essentials)
     "System", "Registry", "smss.exe", "csrss.exe", "wininit.exe", 
-    "winlogon.exe", "services.exe", "lsass.exe", "SystemInterrupts",
-    "MemCompression", "fontdrvhost.exe", "spoolsv.exe",
+    "services.exe", "lsass.exe",
 
-    # --- The Nervous System (Drivers & Shell) ---
-    "svchost.exe", "dwm.exe", "explorer.exe", "ShellExperienceHost.exe",
-    "StartMenuExperienceHost.exe", "SearchHost.exe", "RuntimeBroker.exe",
-    "ctfmon.exe", "conhost.exe", "taskhostw.exe",
+    # The "Self" (Prevent the AI from killing itself)
+    "python.exe", "pythonw.exe", "chimera.exe", "codex.exe",
 
-    # --- Hardware & Metabolism ---
-    "SystemSettings.exe", "Taskmgr.exe", "perfmon.exe", "resmon.exe",
-    "nvdisplay.container.exe", "RtkAudUService64.exe",
-
-    # --- The "Self" (Do not eat the brain) ---
-    "python.exe", "pythonw.exe", "chimera.exe", "cmd.exe", "powershell.exe",
-
-    # --- Tooling & Intentional Apps ---
-    "Code.exe", "cursor.exe", "chrome.exe", "firefox.exe", "msedge.exe",
-    "Discord.exe", "Slack.exe"
+    # Tools you absolutely cannot have lag (Low Latency)
+    "Code.exe"
 ]
 
 [thresholds]

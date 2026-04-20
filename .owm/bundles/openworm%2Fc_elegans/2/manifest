@@ -1,0 +1,6 @@
+{
+    "id": "openworm/c_elegans",
+    "version": 2,
+    "manifest_version": 1,
+    "deps": []
+}

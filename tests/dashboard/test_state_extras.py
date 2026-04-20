@@ -53,6 +53,27 @@ def test_state_has_runtime_flags() -> None:
     _ = bus
 
 
+def test_state_accepts_initial_worm_state() -> None:
+    bus, client = _client(
+        worm_state={
+            "available": True,
+            "neuron_count": 302,
+            "active_count": 0,
+            "active_fraction": 0.0,
+            "status": "idle",
+            "sample": ["ADAL", "ADAR"],
+            "active_neurons": [],
+            "graphs_dir": "C:/graphs",
+        }
+    )
+    with client:
+        j = client.get("/state").json()
+        assert j["neuro"]["worm"]["available"] is True
+        assert j["neuro"]["worm"]["neuron_count"] == 302
+        assert j["neuro"]["worm"]["sample"] == ["ADAL", "ADAR"]
+    _ = bus
+
+
 def test_state_defaults_empty_when_no_extras() -> None:
     bus, client = _client()
     with client:

@@ -50,6 +50,7 @@ def create_app(
     protected_species: frozenset[str] | None = None,
     brains_available: dict[str, bool] | None = None,
     runtime_flags: dict[str, bool] | None = None,
+    worm_state: dict[str, Any] | None = None,
     history_size: int = 200,
 ) -> FastAPI:
     recent: deque[dict] = deque(maxlen=history_size)
@@ -58,6 +59,17 @@ def create_app(
         "mouse_rate": {"e_rate_hz": 0.0, "i_rate_hz": 0.0, "ts": None},
         "last_zebrafish_spike": None,
         "last_fly_spike": None,
+        "worm": worm_state
+        or {
+            "available": False,
+            "neuron_count": 0,
+            "active_count": 0,
+            "active_fraction": 0.0,
+            "status": "idle",
+            "sample": [],
+            "active_neurons": [],
+            "graphs_dir": None,
+        },
     }
     protected_list: list[str] = sorted(protected_species) if protected_species else []
     brains_map: dict[str, bool] = dict(brains_available) if brains_available else {}
@@ -77,6 +89,8 @@ def create_app(
                     neuro_state["last_zebrafish_spike"] = {**ev.payload, "ts": ev.ts}
                 elif ev.topic == "neuro.fly.spike":
                     neuro_state["last_fly_spike"] = {**ev.payload, "ts": ev.ts}
+                elif ev.topic == "neuro.worm.state":
+                    neuro_state["worm"] = {**ev.payload, "ts": ev.ts}
         finally:
             bus.unsubscribe("", q)
 
